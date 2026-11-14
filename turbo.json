@@ -1,6 +1,10 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
+  "globalEnv": [
+    "DATABASE_URL",
+    "DIRECT_URL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": [
@@ -18,7 +22,6 @@
         "!.next/dev/**"
       ],
       "env": [
-        "DATABASE_URL",
         "PORT",
         "CORS_ORIGIN",
         "NODE_ENV",
