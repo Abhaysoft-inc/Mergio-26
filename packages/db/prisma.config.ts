@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
@@ -7,6 +7,10 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    // CLI commands (migrate, db push, studio) need a session connection, so prefer
+    // Supabase's session pooler (DIRECT_URL) and fall back to DATABASE_URL.
+    // Read process.env directly instead of env(): env() throws when the variable is
+    // missing, and `prisma generate` (run during builds) never connects to the database.
+    url: process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? "",
   },
 });
