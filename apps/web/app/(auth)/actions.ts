@@ -1,10 +1,12 @@
 "use server";
 
 import { prisma } from "@repo/db";
+import { enqueueJobs } from "@repo/scoring/server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getSession } from "@/lib/dal";
+import { linkMentorInvites } from "@/lib/mentor-service";
 import {
   parseRole,
   registrationSchema,
@@ -14,7 +16,8 @@ import {
 export async function signInWithGitHub(formData: FormData) {
   // Only ever return to our own registration page. The role is validated, never echoed raw.
   const role = parseRole(formData.get("role")?.toString());
-  const callbackURL = role ? `/register?role=${role.toLowerCase()}` : "/register";
+  // "signin" lets the register page send people who are already registered on to their dashboard.
+  const callbackURL = role ? `/register?signin=1&role=${role.toLowerCase()}` : "/register?signin=1";
 
   const { url } = await auth.api.signInSocial({
     body: { provider: "github", callbackURL },
@@ -105,6 +108,13 @@ export async function registerAction(
       skipDuplicates: true,
     }),
   ]);
+
+  // PRs merged before the contributor registered were NOT_REGISTERED; score them now (F-06 edge case).
+  if (newRoles.includes("CONTRIBUTOR")) {
+    await enqueueJobs([{ kind: "USER_RESCORE", payload: { userId } }]);
+  }
+  // Project admins may have invited this GitHub login as a mentor before they signed up.
+  await linkMentorInvites(session.user);
 
   redirect("/dashboard");
 }

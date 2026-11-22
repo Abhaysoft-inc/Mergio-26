@@ -26,17 +26,19 @@ enum RegistrationStatus {
 // ---------------------------------------------------------------------------
 
 model User {
-  id            String   @id
-  name          String
-  email         String   @unique
-  emailVerified Boolean  @default(false)
-  image         String?
+  id                 String    @id
+  name               String
+  email              String    @unique
+  emailVerified      Boolean   @default(false)
+  image              String?
   // GitHub's numeric id lives in Account.accountId (it never changes).
   // The login is refreshed on every sign-in because users can rename themselves.
-  githubLogin   String?  @unique
-  isAdmin       Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  githubLogin        String?   @unique
+  isAdmin            Boolean   @default(false)
+  // Set by 3 spam strikes or an organizer; PRs merged after it don't score (AUTHOR_SANCTIONED).
+  scoringSuspendedAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   sessions      Session[]
   accounts      Account[]
@@ -45,6 +47,14 @@ model User {
   projects      Project[]
   reviews       ProjectReview[]
   emails        EmailOutbox[]
+  pullRequests  PullRequest[]
+  scoreEvents   ScoreEvent[]
+  badges        UserBadge[]
+  disputes      Dispute[]
+  mentorships   ProjectMentor[]
+  mentorPoints  MentorPointEvent[]
+  flagsRaised   Flag[]             @relation("FlagReporter")
+  flagsReceived Flag[]             @relation("FlagTarget")
 }
 
 model Session {
@@ -117,16 +127,19 @@ model Profile {
 // One per (user, role). A person can be a maintainer and a mentor at once, and
 // each role has its own review status.
 model Registration {
-  id        String             @id @default(cuid())
-  userId    String
-  role      Role
-  status    RegistrationStatus @default(PENDING)
+  id           String             @id @default(cuid())
+  userId       String
+  role         Role
+  status       RegistrationStatus @default(PENDING)
   // Optional repo link given at sign-up (maintainers). Project submission is a later phase.
-  repoUrl   String?
+  repoUrl      String?
   // Role-specific answers (e.g. mentor expertise) so the schema doesn't change per question.
-  answers   Json?
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
+  answers      Json?
+  // When and by whom an organizer approved or rejected it (mentors and maintainers).
+  reviewedAt   DateTime?
+  reviewedById String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -141,14 +154,25 @@ model Registration {
 // ---------------------------------------------------------------------------
 
 model Season {
-  id        String   @id @default(cuid())
-  slug      String   @unique
-  name      String
-  isActive  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String    @id @default(cuid())
+  slug           String    @unique
+  name           String
+  isActive       Boolean   @default(false)
+  // The contribution window: only PRs merged inside it score. Unset means nothing scores yet.
+  codingStartsAt DateTime?
+  codingEndsAt   DateTime?
+  // Overrides for the default label names, points and caps (resolveRules() in packages/scoring).
+  scoringRules   Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  projects Project[]
+  projects     Project[]
+  pullRequests PullRequest[]
+  scoreEvents  ScoreEvent[]
+  badges       UserBadge[]
+  disputes     Dispute[]
+  mentorPoints MentorPointEvent[]
+  flags        Flag[]
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +243,7 @@ model Project {
   copies     Project[]       @relation("ProjectCopies")
   repos      ProjectRepo[]
   reviews    ProjectReview[]
+  mentors    ProjectMentor[]
 
   @@unique([seasonId, slug])
   @@index([seasonId, status])
@@ -226,24 +251,34 @@ model Project {
 }
 
 model ProjectRepo {
-  id             String             @id @default(cuid())
-  projectId      String
+  id              String             @id @default(cuid())
+  projectId       String
   // GitHub's numeric repo id never changes, even when a repo is renamed or
   // transferred; owner and name are refreshed from GitHub.
-  githubRepoId   BigInt
-  owner          String
-  name           String
-  approval       RepoApproval       @default(PENDING)
-  trackingStatus RepoTrackingStatus @default(NOT_INSTALLED)
+  githubRepoId    BigInt
+  owner           String
+  name            String
+  approval        RepoApproval       @default(PENDING)
+  trackingStatus  RepoTrackingStatus @default(NOT_INSTALLED)
   // The last GitHub validation: which checks passed (see lib/github.ts in apps/web).
-  validation     Json?
-  validatedAt    DateTime?
+  validation      Json?
+  validatedAt     DateTime?
   // Removing a repo stops future scoring but keeps the row (and its earned points).
-  removedAt      DateTime?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  removedAt       DateTime?
+  // Set by the GitHub App's installation webhooks (F-06).
+  installationId  BigInt?
+  defaultBranch   String?
+  // The last full sync (installation or nightly reconciliation).
+  lastSyncedAt    DateTime?
+  // Program labels the repo still lacks after the worker tried to create them (repo health).
+  missingLabels   String[]           @default([])
+  labelsCheckedAt DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  pullRequests PullRequest[]
+  issues       ProgramIssue[]
 
   @@unique([projectId, githubRepoId])
   @@index([githubRepoId])
@@ -302,4 +337,420 @@ model EmailOutbox {
   toUser User? @relation(fields: [toUserId], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// PR tracking (F-06). The GitHub App's webhooks land in WebhookDelivery and queue a SyncJob;
+// the worker in apps/backend refetches the PR from GitHub and stores it here.
+// ---------------------------------------------------------------------------
+
+// Every webhook GitHub sends. The delivery id is the key, so redeliveries are ignored.
+model WebhookDelivery {
+  id             String   @id
+  event          String
+  action         String?
+  githubRepoId   BigInt?
+  installationId BigInt?
+  payload        Json
+  receivedAt     DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
+enum SyncJobKind {
+  MENTOR_ACCESS
+  PULL_REQUEST
+  ISSUE
+  REPO_RESYNC
+  INSTALLATION
+  REPOSITORY
+  USER_RESCORE
+}
+
+enum SyncJobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+// A Postgres-backed job queue. At most one QUEUED job per dedupeKey (a partial unique index in
+// the migration), so a burst of webhooks for one PR becomes one refetch.
+model SyncJob {
+  id         String        @id @default(cuid())
+  kind       SyncJobKind
+  // e.g. "pr:<githubRepoId>:<number>". Jobs refetch current state, so one queued job is enough.
+  dedupeKey  String
+  payload    Json
+  status     SyncJobStatus @default(QUEUED)
+  runAt      DateTime      @default(now())
+  attempts   Int           @default(0)
+  lockedAt   DateTime?
+  lastError  String?
+  finishedAt DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@index([status, runAt])
+  @@index([dedupeKey])
+}
+
+enum PullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum PrLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+// The scoring outcome shown on the dashboard. INVALIDATED: invalid/spam label or reverted.
+enum PrScoreStatus {
+  OPEN
+  CLOSED
+  AWAITING_LABEL
+  SCORED
+  NOT_ELIGIBLE
+  INVALIDATED
+}
+
+// Fixed reason codes (PRD §4.2). Keep in sync with REASON_CODES in packages/scoring.
+enum ScoreReason {
+  NOT_REGISTERED
+  NO_PROGRAM_LABEL
+  NO_LEVEL_LABEL
+  MULTIPLE_LEVEL_LABELS
+  OUTSIDE_WINDOW
+  REPO_NOT_TRACKED
+  WRONG_BASE_BRANCH
+  SELF_MERGED
+  AUTHOR_IS_MENTOR
+  CAP_REACHED
+  INVALID_LABEL
+  SPAM_LABEL
+  REVERTED
+  AUTHOR_SANCTIONED
+}
+
+model PullRequest {
+  id                  String           @id @default(cuid())
+  repoId              String
+  // The repo's project's season, copied here for fast per-season queries.
+  seasonId            String
+  githubId            BigInt
+  number              Int
+  title               String
+  url                 String
+  authorGithubId      BigInt
+  authorLogin         String
+  // Linked when the author has a Mergio account (now or when they sign up later).
+  authorId            String?
+  state               PullRequestState
+  isDraft             Boolean          @default(false)
+  baseRef             String
+  labels              String[]
+  linkedIssueNumbers  Int[]
+  linkedIssueLabels   String[]
+  // Per closed issue: the GitHub id of who added its level label (or program label), for mentor
+  // points. [{ "number": 12, "githubId": "123" }]
+  linkedIssueLabelers Json?
+  additions           Int              @default(0)
+  deletions           Int              @default(0)
+  // Changed non-whitespace lines; null when not measured (large diffs).
+  changedLines        Int?
+  mergedAt            DateTime?
+  mergedByGithubId    BigInt?
+  mergedByLogin       String?
+  closedAt            DateTime?
+  // Set on a revert PR ("Reverts owner/repo#12"): the number of the PR it reverts.
+  revertsNumber       Int?
+  // GitHub ids of reviewers who approved it (mentor points, PRD §4.5).
+  approvedByGithubIds BigInt[]
+  githubCreatedAt     DateTime
+  githubUpdatedAt     DateTime
+
+  scoreStatus   PrScoreStatus @default(OPEN)
+  scoreReason   ScoreReason?
+  level         PrLevel?
+  // Net points on the ledger for this PR (kept in step with ScoreEvent).
+  points        Int           @default(0)
+  // While AWAITING_LABEL: when the grace window ends and it is scored for good.
+  labelDeadline DateTime?
+  // Explanations for the contributor (level from the linked issue, capped to beginner, ...).
+  scoreNotes    String[]
+  scoredAt      DateTime?
+  lastSyncedAt  DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  repo         ProjectRepo        @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  season       Season             @relation(fields: [seasonId], references: [id])
+  author       User?              @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  labelEvents  PrLabelEvent[]
+  mentorPoints MentorPointEvent[]
+  flags        Flag[]
+  scoreEvents  ScoreEvent[]
+  disputes     Dispute[]
+
+  @@unique([repoId, number])
+  @@index([githubId])
+  @@index([authorId, seasonId])
+  @@index([authorGithubId])
+  @@index([scoreStatus, labelDeadline])
+}
+
+enum LabelAction {
+  ADDED
+  REMOVED
+}
+
+// The label history of a PR, from GitHub's timeline (who labelled what, when).
+model PrLabelEvent {
+  id            String      @id @default(cuid())
+  pullRequestId String
+  githubEventId String      @unique
+  label         String
+  action        LabelAction
+  actorLogin    String?
+  createdAt     DateTime
+
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@index([pullRequestId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Scoring ledger (F-07). Append-only: a change in a PR's worth is a new entry for the difference
+// (or a reversal), never an edit. A contributor's points are the sum of their entries that are
+// already effective; the daily cap can make an entry effective later than it was written.
+// ---------------------------------------------------------------------------
+
+enum ScoreEventKind {
+  AWARD
+  REVERSAL
+  ADJUSTMENT
+  DISPUTE_CORRECTION
+}
+
+model ScoreEvent {
+  id             String         @id @default(cuid())
+  seasonId       String
+  userId         String
+  pullRequestId  String?
+  kind           ScoreEventKind
+  // "base", "bonus:quality", ...; adjustments and dispute corrections use their own keys.
+  ruleKey        String
+  points         Int
+  level          PrLevel?
+  // What the entry is for, shown in the points ledger.
+  description    String
+  // For a reversal: why the points were taken back.
+  reason         ScoreReason?
+  effectiveAt    DateTime
+  // prId:ruleKey:sequence, so a duplicate write fails instead of double counting.
+  idempotencyKey String         @unique
+  createdAt      DateTime       @default(now())
+
+  season      Season       @relation(fields: [seasonId], references: [id])
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pullRequest PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: SetNull)
+
+  @@index([seasonId, userId, effectiveAt])
+  @@index([seasonId, effectiveAt])
+  @@index([pullRequestId])
+}
+
+// ---------------------------------------------------------------------------
+// Badges (F-15). Definitions are synced from BADGES in packages/scoring.
+// ---------------------------------------------------------------------------
+
+model BadgeDefinition {
+  key         String   @id
+  name        String
+  description String
+  ruleKey     String
+  threshold   Int
+  sortOrder   Int
+  updatedAt   DateTime @updatedAt
+
+  awards UserBadge[]
+}
+
+model UserBadge {
+  id       String   @id @default(cuid())
+  userId   String
+  seasonId String
+  badgeKey String
+  earnedAt DateTime @default(now())
+
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  season Season          @relation(fields: [seasonId], references: [id])
+  badge  BadgeDefinition @relation(fields: [badgeKey], references: [key])
+
+  @@unique([userId, seasonId, badgeKey])
+}
+
+// ---------------------------------------------------------------------------
+// Issues (F-09): open program issues on tracked repos, for discovery and recommendations.
+// ---------------------------------------------------------------------------
+
+enum IssueState {
+  OPEN
+  CLOSED
+}
+
+model ProgramIssue {
+  id              String     @id @default(cuid())
+  repoId          String
+  githubId        BigInt
+  number          Int
+  title           String
+  url             String
+  state           IssueState
+  labels          String[]
+  level           PrLevel?
+  assigneeCount   Int        @default(0)
+  githubCreatedAt DateTime
+  githubUpdatedAt DateTime
+  lastSyncedAt    DateTime   @default(now())
+
+  repo ProjectRepo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, number])
+  @@index([state, level])
+}
+
+// ---------------------------------------------------------------------------
+// Disputes (F-12). Contributors open them from the dashboard; organizers resolve them in the
+// admin console (later). An upheld dispute adds a DISPUTE_CORRECTION ledger entry.
+// ---------------------------------------------------------------------------
+
+enum DisputeCategory {
+  WRONG_LEVEL
+  MISSING_POINTS
+  WRONGLY_INELIGIBLE
+  WRONGLY_INVALIDATED
+  OTHER
+}
+
+enum DisputeStatus {
+  OPEN
+  IN_REVIEW
+  UPHELD
+  REJECTED
+}
+
+model Dispute {
+  id            String          @id @default(cuid())
+  seasonId      String
+  userId        String
+  pullRequestId String
+  category      DisputeCategory
+  text          String
+  evidenceUrls  String[]
+  status        DisputeStatus   @default(OPEN)
+  resolvedAt    DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  season      Season      @relation(fields: [seasonId], references: [id])
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pullRequest PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([pullRequestId])
+  @@index([status, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Mentors (F-05). A project admin invites mentors by GitHub login; the row links to the user
+// once they have signed in. A mentor is active when linked and their MENTOR registration is
+// APPROVED by an organizer. Deleting the row removes access immediately.
+// ---------------------------------------------------------------------------
+
+model ProjectMentor {
+  id              String    @id @default(cuid())
+  projectId       String
+  // Lower-cased login as invited.
+  githubLogin     String
+  userId          String?
+  invitedById     String?
+  // GitHub role per repo ("owner/name" -> "triage", "write", ... or "none"), checked by the
+  // worker: mentors need at least triage to apply labels.
+  repoAccess      Json?
+  accessCheckedAt DateTime?
+  createdAt       DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, githubLogin])
+  @@index([userId])
+}
+
+// Mentor points (PRD §4.5), separate from contributor scores. Append-only like ScoreEvent:
+// ruleKey is "review:<pullRequestId>" (+5 per approving review on a scored PR) or
+// "issue:<repoId>#<number>" (+2 when an issue the mentor labelled gets a scored PR).
+model MentorPointEvent {
+  id             String   @id @default(cuid())
+  seasonId       String
+  userId         String
+  pullRequestId  String?
+  ruleKey        String
+  points         Int
+  description    String
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+
+  season      Season       @relation(fields: [seasonId], references: [id])
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pullRequest PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: SetNull)
+
+  @@index([seasonId, userId, createdAt])
+  @@index([ruleKey])
+}
+
+// ---------------------------------------------------------------------------
+// Flags (F-12): mentors, project admins and organizers report abuse. Organizers act on them
+// in the admin console (F-11).
+// ---------------------------------------------------------------------------
+
+enum FlagCategory {
+  SPAM
+  PLAGIARISM
+  LOW_QUALITY_AI
+  MULTIPLE_ACCOUNTS
+  OTHER
+}
+
+enum FlagStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+model Flag {
+  id                String       @id @default(cuid())
+  seasonId          String
+  reporterId        String
+  // The flagged person: a user when they have an account, always their GitHub login.
+  targetUserId      String?
+  targetGithubLogin String
+  pullRequestId     String?
+  category          FlagCategory
+  note              String
+  status            FlagStatus   @default(OPEN)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  season      Season       @relation(fields: [seasonId], references: [id])
+  reporter    User         @relation("FlagReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetUser  User?        @relation("FlagTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  pullRequest PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([targetUserId])
+  @@index([reporterId, pullRequestId])
 }

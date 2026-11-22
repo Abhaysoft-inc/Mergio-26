@@ -9,10 +9,15 @@
     "start": "node --env-file-if-exists=.env dist/index.js",
     "lint": "eslint src --max-warnings 0",
     "check-types": "tsc --noEmit",
-    "export:registrations": "tsx --env-file-if-exists=.env src/scripts/export-registrations.ts"
+    "export:registrations": "tsx --env-file-if-exists=.env src/scripts/export-registrations.ts",
+    "worker": "tsx --env-file-if-exists=.env src/worker-main.ts",
+    "start:worker": "node --env-file-if-exists=.env dist/worker-main.js",
+    "season:window": "tsx --env-file-if-exists=.env src/scripts/season-window.ts",
+    "resync": "tsx --env-file-if-exists=.env src/scripts/resync.ts"
   },
   "dependencies": {
     "@repo/db": "workspace:*",
+    "@repo/scoring": "workspace:*",
     "cors": "2.8.6",
     "express": "5.3.0",
     "helmet": "8.3.0"

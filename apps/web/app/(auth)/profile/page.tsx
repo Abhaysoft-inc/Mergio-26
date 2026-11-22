@@ -5,6 +5,7 @@ import { Icon } from "@/components/landing/icon";
 import { requireUser } from "@/lib/dal";
 import { roleInfo } from "@/lib/registration";
 import { AccountNav } from "../account-nav";
+import { ContactForm } from "./contact-form";
 
 export const metadata: Metadata = {
   title: "My profile — Mergio",
@@ -31,6 +32,7 @@ export default async function ProfilePage() {
   ]);
 
   const details = [
+    { label: "GitHub", value: user.githubLogin ? `@${user.githubLogin}` : null },
     { label: "Email", value: user.email },
     { label: "College", value: profile?.college },
     { label: "Graduation year", value: profile?.graduationYear },
@@ -40,7 +42,7 @@ export default async function ProfilePage() {
 
   return (
     <div className="w-full max-w-2xl">
-      <AccountNav active="profile" isAdmin={user.isAdmin === true} />
+      <AccountNav active="profile" user={user} />
 
       <section className="panel p-8">
         <div className="flex items-center gap-5">
@@ -68,12 +70,25 @@ export default async function ProfilePage() {
               {user.name}
             </h1>
             <p className="mt-1 inline-flex items-center gap-1.5 font-mono text-sm text-(color:--dim)">
-              <Icon name="github" size={15} className="text-(color:--ice)" />@{user.githubLogin}
+              <Icon name="github" size={15} className="text-(color:--ice)" />
+              {user.githubLogin ? (
+                <a
+                  href={`https://github.com/${user.githubLogin}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-(color:--ice)"
+                >
+                  @{user.githubLogin}
+                </a>
+              ) : (
+                "GitHub username unavailable"
+              )}
             </p>
           </div>
         </div>
 
         {profile ? (
+          <>
           <dl className="mt-8 mb-0">
             {details.map(({ label, value }) => (
               <div
@@ -85,6 +100,8 @@ export default async function ProfilePage() {
               </div>
             ))}
           </dl>
+          <ContactForm phone={profile.phone} discord={profile.discord} />
+          </>
         ) : (
           <p className="mt-8 text-(color:--muted)">
             Nothing here yet.{" "}
