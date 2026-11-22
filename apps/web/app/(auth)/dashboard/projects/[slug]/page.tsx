@@ -12,7 +12,7 @@ import { addMentorAction, removeMentorAction } from "../../actions";
 import { MentorsPanel } from "./mentors-panel";
 
 export const metadata: Metadata = {
-  title: "Project dashboard — Mergio",
+  title: "Project dashboard - Mergio",
 };
 
 const heading = "font-mono text-[13px] font-medium tracking-widest text-(color:--muted) uppercase";

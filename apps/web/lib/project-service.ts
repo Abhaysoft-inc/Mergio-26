@@ -429,6 +429,38 @@ export async function addRepo(
  * stay and only future scoring stops; the last accepted repo can't be removed, so a live project
  * never drops to zero tracked repos. On a draft it is simply deleted.
  */
+/**
+ * Deletes a project with its repos, reviews, mentors, PRs and score events. The project admin can
+ * delete their own project only while no pull request has been recorded for it, so earned points
+ * are never wiped by accident. Organizers can delete any project.
+ */
+export async function deleteProject(
+  actor: Actor,
+  projectId: string,
+): Promise<Result<{ slug: string }>> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, slug: true, ownerId: true },
+  });
+  const isAdmin = actor.isAdmin === true;
+  if (!project || (project.ownerId !== actor.id && !isAdmin)) {
+    return fail(404, "Project not found.");
+  }
+  if (!isAdmin) {
+    const prs = await prisma.pullRequest.count({
+      where: { repo: { projectId } },
+    });
+    if (prs > 0) {
+      return fail(
+        409,
+        "This project already has pull requests on record, so only an organizer can delete it.",
+      );
+    }
+  }
+  await prisma.project.delete({ where: { id: projectId } });
+  return { ok: true, slug: project.slug };
+}
+
 export async function removeRepo(
   actor: Actor,
   projectId: string,

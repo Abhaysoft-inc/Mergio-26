@@ -10,6 +10,7 @@ import { githubAppInstallUrl } from "@/lib/project-status";
 import { activeSeason } from "@/lib/projects-server";
 import {
   addRepoAction,
+  deleteProjectAction,
   removeRepoAction,
   saveApprovedDetailsAction,
   saveProjectAction,
@@ -17,6 +18,7 @@ import {
 } from "../../actions";
 import {
   AddRepoForm,
+  DeleteProjectButton,
   ApprovedDetailsForm,
   RemoveRepoButton,
 } from "../../approved-tools";
@@ -56,6 +58,9 @@ export default async function ManageProjectPage({
   // Only the project admin manages a project; anyone else gets the same 404 as a missing one.
   if (!project || project.ownerId !== user.id) notFound();
 
+  const prCount = await prisma.pullRequest.count({
+    where: { repo: { projectId: project.id } },
+  });
   const editable = EDITABLE_STATUSES.includes(project.status);
   const allPassed = allReposPassed(project.repos);
   const installUrl = githubAppInstallUrl();
@@ -281,6 +286,29 @@ export default async function ManageProjectPage({
           </p>
         </section>
       )}
+
+      <section className="panel mt-5 p-6">
+        <h2 className="font-mono text-xs tracking-widest text-[#E5484D] uppercase">
+          Delete project
+        </h2>
+        {prCount === 0 ? (
+          <>
+            <p className="mt-2 mb-4 text-sm text-(color:--muted)">
+              Removes the application, its repos and mentors for good.
+            </p>
+            <DeleteProjectButton
+              action={deleteProjectAction.bind(null, project.id, "/dashboard")}
+              name={project.name}
+              warning="Its repos and mentors are removed too."
+            />
+          </>
+        ) : (
+          <p className="mt-2 mb-0 text-sm text-(color:--muted)">
+            This project has pull requests on record, so points have been earned on it. Ask an
+            organizer if it needs to be deleted.
+          </p>
+        )}
+      </section>
     </div>
   );
 }

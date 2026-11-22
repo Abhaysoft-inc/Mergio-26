@@ -8,6 +8,8 @@ import { StatusBadge } from "@/components/projects/status-badge";
 import { requireAdmin } from "@/lib/dal";
 import { statusInfo } from "@/lib/projects";
 import { NEEDS_PUBLIC_REASON, TRANSITIONS } from "@/lib/project-status";
+import { DeleteProjectButton } from "../../../projects/approved-tools";
+import { deleteProjectAction } from "../../../projects/actions";
 import { decideRepoAction, reviewProjectAction } from "../actions";
 import { RepoDecisionForm } from "./repo-decision";
 import { ReviewForm, type Decision } from "./review-form";
@@ -50,6 +52,9 @@ export default async function AdminProjectPage({
     },
   });
   if (!project) notFound();
+  const prCount = await prisma.pullRequest.count({
+    where: { repo: { projectId: project.id } },
+  });
 
   // Organizers act on submitted applications; submitting is the project admin's move.
   const decisions: Decision[] = TRANSITIONS[project.status]
@@ -275,6 +280,30 @@ export default async function AdminProjectPage({
                 No activity yet.
               </p>
             )}
+          </section>
+
+          <section className="panel p-6">
+            <h2 className="font-mono text-xs tracking-widest text-[#E5484D] uppercase">
+              Delete project
+            </h2>
+            <p className="mt-2 mb-4 text-sm text-(color:--muted)">
+              {prCount > 0
+                ? `Also deletes ${prCount} pull requests and every point earned on them.`
+                : "Removes the application, its repos and mentors."}
+            </p>
+            <DeleteProjectButton
+              action={deleteProjectAction.bind(
+                null,
+                project.id,
+                "/admin/projects",
+              )}
+              name={project.name}
+              warning={
+                prCount > 0
+                  ? `${prCount} pull requests and their points are deleted too.`
+                  : "Its repos and mentors are removed too."
+              }
+            />
           </section>
         </div>
       </div>
