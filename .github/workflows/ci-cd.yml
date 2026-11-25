@@ -1,0 +1,122 @@
+# CI on every pull request and every push to main. After CI passes on main, the backend is
+# deployed to the VPS whenever the push changed it (or the database schema); it can also be
+# deployed by hand from the Actions tab: "CI/CD" → "Run workflow". The web app is deployed by
+# Vercel on its own. How the deploy works and its one-time setup: deploy/README.md.
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full SHA of a commit on main to deploy. Leave empty for the latest; pick an older one to roll back.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a pull request cancels the older run of that pull request. Runs on main
+  # are never cancelled (each has its own group).
+  group: ci-cd-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  check:
+    name: Lint, types, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      backend: ${{ steps.changes.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          fetch-depth: 0
+
+      - id: target
+        name: Resolve the commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - id: changes
+        name: Does this push change the backend?
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          backend=true
+          # A push that touches only the web app doesn't redeploy the backend. Anything the
+          # backend image is built from counts, including packages/db (migrations).
+          if [ "$EVENT" = push ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null &&
+            git diff --quiet "$BEFORE" HEAD -- apps/backend packages deploy .dockerignore \
+              package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json; then
+            backend=false
+          fi
+          echo "backend=$backend" | tee -a "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install pnpm
+        run: npm install -g pnpm@12.6.0
+
+      - id: pnpm-store
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      # The Prisma client is git-ignored; generating it needs no database.
+      - run: pnpm db:generate
+
+      - run: pnpm turbo run lint check-types build
+
+      - run: pnpm -r --if-present run test
+
+  deploy:
+    name: Deploy the backend
+    needs: check
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && needs.check.outputs.backend == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://api.mergio.in/health
+    concurrency:
+      # One deploy at a time; a newer one waits for the running one instead of cancelling it.
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Build and start it on the server
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ vars.DEPLOY_HOST }}
+          SHA: ${{ needs.check.outputs.sha }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # The key can run only the server's mergio-deploy command (deploy/mergio-deploy).
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 "root@$HOST" "deploy $SHA"
+
+      - name: Check https://api.mergio.in/health
+        run: curl -fsS --retry 10 --retry-delay 3 --retry-all-errors https://api.mergio.in/health

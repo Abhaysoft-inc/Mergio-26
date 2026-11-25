@@ -38,18 +38,58 @@ Then:
    Common Exploits on; SSL tab: request a new Let's Encrypt certificate, Force SSL, HTTP/2.
 3. Check `https://api.mergio.in/health` → `{"status":"ok","database":"connected"}`.
 
-## Updating
+## Updating: automatic
+
+`.github/workflows/ci-cd.yml` runs lint, type checks, tests and the build on every pull request
+and push to main. After it passes on main, it deploys the backend if the push changed anything
+the backend is built from (`apps/backend`, `packages/` including migrations, `deploy/`, the
+lockfile). Pushes that change only the web app skip the deploy; Vercel deploys those itself.
+
+- **Deploy now:** GitHub → Actions → **CI/CD** → **Run workflow** (branch `main`).
+- **Roll back:** the same, with an older commit's full SHA in "Commit". Images of the last 3
+  deploys stay on the server, so going back to one of them doesn't rebuild.
+
+On the server, `deploy.sh` builds images tagged with the commit, backs up the database to
+`/opt/mergio/backups/pre-<commit>-<time>.dump` and applies migrations if any are pending,
+starts the new container, and waits for `/health` to report the database connected. If it
+doesn't, the previous image is started again, the job fails, and the new container's logs are
+in `/opt/mergio/last-failed-deploy.log`. Deploy history: `/opt/mergio/deploys.log`.
+
+Migrations are applied before the new code starts, and Vercel deploys the web app at the same
+time, so a migration must also work with the code that's still running: add columns and tables
+first, and remove old ones in a later release.
+
+### One-time setup
+
+GitHub connects with its own SSH key, which can run only `mergio-deploy` (it accepts
+`deploy <commit on main>` and nothing else). On the server, as root:
 
 ```sh
-cd /opt/mergio/src && git pull
-cd deploy
-docker compose run --rm migrate           # new migrations? apply them before restarting
-docker compose up -d --build
-docker image prune -f                     # remove the previous build's leftovers
+install -m 755 /opt/mergio/src/deploy/mergio-deploy /usr/local/bin/mergio-deploy
+ssh-keygen -t ed25519 -N "" -C github-actions-mergio-deploy -f /root/mergio-deploy-key
+echo "restrict,command=\"/usr/local/bin/mergio-deploy\" $(cat /root/mergio-deploy-key.pub)" \
+  >> /root/.ssh/authorized_keys
 ```
 
-Logs: `docker compose logs -f backend`. Roll back: `git checkout <commit>` and
-`docker compose up -d --build`.
+In GitHub → repo Settings → Environments → **production** (deployment branches: `main` only):
+
+| Name | Kind | Value |
+| --- | --- | --- |
+| `DEPLOY_SSH_KEY` | secret | contents of `/root/mergio-deploy-key`; then delete that file |
+| `DEPLOY_KNOWN_HOSTS` | secret | `<server IP> ` + contents of `/etc/ssh/ssh_host_ed25519_key.pub` |
+| `DEPLOY_HOST` | variable | the server's IP |
+
+Rerun the `install` line whenever `mergio-deploy` changes. `deploy.sh` needs nothing: it runs
+from the commit being deployed.
+
+## Updating: by hand
+
+```sh
+cd /opt/mergio/src && git fetch && git checkout --detach origin/main
+bash deploy/deploy.sh "$(git rev-parse HEAD)"
+```
+
+Logs: `docker compose logs -f backend` (in `deploy/`).
 
 ## Settings
 

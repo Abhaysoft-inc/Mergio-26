@@ -1,4 +1,6 @@
 # The Mergio backend on a server, behind an existing reverse proxy (see README.md).
+# Deploys normally go through GitHub Actions and deploy.sh, which tag the images with the
+# commit (MERGIO_TAG). By hand:
 #   docker compose up -d --build            build and (re)start the backend
 #   docker compose run --rm migrate         `prisma migrate status` against the database
 #   docker compose run --rm migrate migrate deploy    apply pending migrations
@@ -10,7 +12,7 @@ services:
       context: ..
       dockerfile: apps/backend/Dockerfile
       target: run
-    image: mergio-backend
+    image: mergio-backend:${MERGIO_TAG:-latest}
     container_name: mergio-backend
     env_file: ${MERGIO_ENV_FILE:-/opt/mergio/backend.env}
     restart: unless-stopped
@@ -23,7 +25,7 @@ services:
       context: ..
       dockerfile: apps/backend/Dockerfile
       target: build
-    image: mergio-backend-tools
+    image: mergio-backend-tools:${MERGIO_TAG:-latest}
     profiles: [tools]
     env_file: ${MERGIO_ENV_FILE:-/opt/mergio/backend.env}
     working_dir: /app/packages/db
