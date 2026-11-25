@@ -8,7 +8,7 @@ import {
   resolveRules,
   type Evaluation,
 } from "@repo/scoring";
-import { projectStaffIds } from "@repo/scoring/server";
+import { enqueueJobs, projectStaffIds } from "@repo/scoring/server";
 import { awardBadges } from "./badges";
 import { scoreMentorPoints } from "./mentor-points";
 
@@ -65,6 +65,9 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
   const { repo } = pr;
   const { project } = repo;
   const { season } = project;
+  // A finalized season's ledger is locked (PRD §4.8): nothing is rescored until a Super Admin
+  // unfinalizes it.
+  if (season.finalizedAt) return;
   const rules = resolveRules(season.scoringRules);
 
   const authorId = pr.authorId ?? (await userForGithubId(pr.authorGithubId));
@@ -220,6 +223,11 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
           idempotencyKey: `${pr.id}:${entry.ruleKey}:${existing.length + index}`,
         })),
       });
+      // In the same transaction, so a ledger change can't miss its leaderboard update.
+      await enqueueJobs(
+        [{ kind: "LEADERBOARD_REFRESH", payload: { seasonId: season.id, kind: "user", id: authorId } }],
+        { client: tx },
+      );
     }
 
     const net =

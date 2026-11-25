@@ -6,12 +6,17 @@ import { nextCookies } from "better-auth/next-js";
 
 // GitHub usernames (case-insensitive) that become admins on sign-in. This only ever
 // promotes: removing a name here does not demote someone already marked isAdmin.
-const adminLogins = new Set(
-  (process.env.ADMIN_GITHUB_LOGINS ?? "")
-    .split(",")
-    .map((login) => login.trim().toLowerCase())
-    .filter(Boolean),
-);
+const loginsFrom = (value: string | undefined) =>
+  new Set(
+    (value ?? "")
+      .split(",")
+      .map((login) => login.trim().toLowerCase())
+      .filter(Boolean),
+  );
+const adminLogins = loginsFrom(process.env.ADMIN_GITHUB_LOGINS);
+// Super Admins can also undo a finalized leaderboard (PRD §4.8). They are organizers too. Like
+// ADMIN_GITHUB_LOGINS, this only ever promotes.
+const superAdminLogins = loginsFrom(process.env.SUPER_ADMIN_GITHUB_LOGINS);
 
 // Set in production (".mergio.in") so admin.mergio.in can read the same session.
 const cookieDomain = process.env.AUTH_COOKIE_DOMAIN || undefined;
@@ -31,7 +36,11 @@ export const auth = betterAuth({
       overrideUserInfoOnSignIn: true,
       mapProfileToUser: (profile) => ({
         githubLogin: profile.login,
-        ...(adminLogins.has(profile.login.toLowerCase()) ? { isAdmin: true } : {}),
+        ...(adminLogins.has(profile.login.toLowerCase()) ||
+        superAdminLogins.has(profile.login.toLowerCase())
+          ? { isAdmin: true }
+          : {}),
+        ...(superAdminLogins.has(profile.login.toLowerCase()) ? { isSuperAdmin: true } : {}),
       }),
     },
   },
@@ -41,6 +50,7 @@ export const auth = betterAuth({
       // input: false means clients can never set these through the auth API.
       githubLogin: { type: "string", required: false, input: false },
       isAdmin: { type: "boolean", required: false, defaultValue: false, input: false },
+      isSuperAdmin: { type: "boolean", required: false, defaultValue: false, input: false },
     },
   },
 

@@ -35,26 +35,29 @@ model User {
   // The login is refreshed on every sign-in because users can rename themselves.
   githubLogin        String?   @unique
   isAdmin            Boolean   @default(false)
+  // Can undo a finalized leaderboard (PRD §4.8). Promoted from SUPER_ADMIN_GITHUB_LOGINS on sign-in.
+  isSuperAdmin       Boolean   @default(false)
   // Set by 3 spam strikes or an organizer; PRs merged after it don't score (AUTHOR_SANCTIONED).
   scoringSuspendedAt DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  sessions      Session[]
-  accounts      Account[]
-  profile       Profile?
-  registrations Registration[]
-  projects      Project[]
-  reviews       ProjectReview[]
-  emails        EmailOutbox[]
-  pullRequests  PullRequest[]
-  scoreEvents   ScoreEvent[]
-  badges        UserBadge[]
-  disputes      Dispute[]
-  mentorships   ProjectMentor[]
-  mentorPoints  MentorPointEvent[]
-  flagsRaised   Flag[]             @relation("FlagReporter")
-  flagsReceived Flag[]             @relation("FlagTarget")
+  sessions       Session[]
+  accounts       Account[]
+  profile        Profile?
+  registrations  Registration[]
+  projects       Project[]
+  reviews        ProjectReview[]
+  emails         EmailOutbox[]
+  pullRequests   PullRequest[]
+  scoreEvents    ScoreEvent[]
+  badges         UserBadge[]
+  disputes       Dispute[]
+  mentorships    ProjectMentor[]
+  mentorPoints   MentorPointEvent[]
+  flagsRaised    Flag[]             @relation("FlagReporter")
+  flagsReceived  Flag[]             @relation("FlagTarget")
+  collegeAliases CollegeAlias[]
 }
 
 model Session {
@@ -110,18 +113,81 @@ model Verification {
 
 // One per user: details shared across every role they sign up for.
 model Profile {
-  id                      String   @id @default(cuid())
-  userId                  String   @unique
+  id                      String        @id @default(cuid())
+  userId                  String        @unique
+  // What the person typed or picked, kept as their own words.
   college                 String
+  // The curated college it resolves to: picked from the list (USER), or matched through an
+  // organizer's alias (ALIAS). Null until one of the two happens; unmatched profiles are not on
+  // college boards.
+  collegeId               String?
+  collegeMatch            CollegeMatch?
   graduationYear          Int
   phone                   String?
   discord                 String?
   codeOfConductAcceptedAt DateTime
-  updatesOptIn            Boolean  @default(false)
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  updatesOptIn            Boolean       @default(false)
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collegeRecord College? @relation(fields: [collegeId], references: [id], onDelete: SetNull)
+
+  @@index([collegeId])
+  @@index([graduationYear])
+}
+
+enum CollegeMatch {
+  USER
+  ALIAS
+}
+
+// ---------------------------------------------------------------------------
+// Colleges (F-08). A curated list: AICTE-approved technical institutions and UGC-recognised
+// universities, imported with `pnpm --filter backend colleges:import`, plus ones organizers add.
+// ---------------------------------------------------------------------------
+
+enum CollegeSource {
+  AICTE
+  UGC
+  ADMIN
+}
+
+model College {
+  id        String        @id @default(cuid())
+  slug      String        @unique
+  name      String
+  // Full state or union territory name, e.g. "Tamil Nadu". Used by the leaderboard filter.
+  state     String
+  city      String?
+  source    CollegeSource
+  // The id in the source dataset (AICTE permanent id, UGC id); null for ADMIN.
+  sourceId  String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  aliases  CollegeAlias[]
+  profiles Profile[]
+
+  @@unique([source, sourceId])
+  @@index([state])
+}
+
+// Other names for a college: abbreviations and spellings from the dataset, and organizers'
+// mappings of what people typed. `normalized` is normaliseCollegeName() of the text.
+model CollegeAlias {
+  id          String   @id @default(cuid())
+  collegeId   String
+  normalized  String   @unique
+  label       String
+  // The organizer who mapped it; null for aliases from a dataset import.
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  college   College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([collegeId])
 }
 
 // One per (user, role). A person can be a maintainer and a mentor at once, and
@@ -163,16 +229,31 @@ model Season {
   codingEndsAt   DateTime?
   // Overrides for the default label names, points and caps (resolveRules() in packages/scoring).
   scoringRules   Json?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
 
-  projects     Project[]
-  pullRequests PullRequest[]
-  scoreEvents  ScoreEvent[]
-  badges       UserBadge[]
-  disputes     Dispute[]
-  mentorPoints MentorPointEvent[]
-  flags        Flag[]
+  // Leaderboard freeze (PRD §4.8). While frozen, every rank shown (public boards, /me and the
+  // dashboard) comes from freezeSnapshotId; scoring carries on underneath.
+  leaderboardFrozenAt   DateTime?
+  // Null when the worker froze it automatically (48 h before codingEndsAt).
+  leaderboardFrozenById String?
+  // Off after an organizer unfreezes, so the worker doesn't freeze it again.
+  leaderboardAutoFreeze Boolean   @default(true)
+  freezeSnapshotId      String?
+  // Finalized: the ledger is locked and finalSnapshotId holds the official ranks.
+  finalizedAt           DateTime?
+  finalizedById         String?
+  finalSnapshotId       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects             Project[]
+  pullRequests         PullRequest[]
+  scoreEvents          ScoreEvent[]
+  badges               UserBadge[]
+  disputes             Dispute[]
+  mentorPoints         MentorPointEvent[]
+  flags                Flag[]
+  leaderboardSnapshots LeaderboardSnapshot[]
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +446,7 @@ enum SyncJobKind {
   INSTALLATION
   REPOSITORY
   USER_RESCORE
+  LEADERBOARD_REFRESH
 }
 
 enum SyncJobStatus {
@@ -753,4 +835,48 @@ model Flag {
   @@index([status, createdAt])
   @@index([targetUserId])
   @@index([reporterId, pullRequestId])
+}
+
+// ---------------------------------------------------------------------------
+// Leaderboard snapshots (F-08). Redis serves the boards, but a freeze or a finalize is a
+// permanent record, so its ranks live here and Redis loads them back on a cache miss.
+// ---------------------------------------------------------------------------
+
+enum LeaderboardSnapshotKind {
+  FREEZE
+  FINAL
+}
+
+model LeaderboardSnapshot {
+  id        String                  @id @default(cuid())
+  seasonId  String
+  kind      LeaderboardSnapshotKind
+  // The instant the ranks were computed at.
+  takenAt   DateTime
+  takenById String?
+  createdAt DateTime                @default(now())
+
+  season  Season                     @relation(fields: [seasonId], references: [id])
+  entries LeaderboardSnapshotEntry[]
+
+  @@index([seasonId, kind])
+}
+
+model LeaderboardSnapshotEntry {
+  snapshotId   String
+  // "overall", "weekly:2026-11-16", "project:<id>", "college:<id>", "colleges", "mentors"
+  board        String
+  // A user id, or a college id on the "colleges" board.
+  entityId     String
+  rank         Int
+  points       Int
+  advanced     Int
+  intermediate Int
+  beginner     Int
+  reachedAt    DateTime
+
+  snapshot LeaderboardSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@id([snapshotId, board, entityId])
+  @@index([snapshotId, board, rank])
 }

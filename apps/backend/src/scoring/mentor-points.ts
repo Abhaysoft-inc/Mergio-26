@@ -6,7 +6,7 @@ import {
   resolveRules,
   reviewRuleKey,
 } from "@repo/scoring";
-import { projectStaffIds } from "@repo/scoring/server";
+import { enqueueJobs, projectStaffIds } from "@repo/scoring/server";
 
 // Applies mentor points (PRD §4.5) for one PR: its approving reviews, and the issues it closes.
 // Called after the PR's contributor score is updated, so its scoreStatus is current.
@@ -30,6 +30,8 @@ export async function scoreMentorPoints(pullRequestId: string) {
   });
   if (!pr) return;
   const { project } = pr.repo;
+  // Locked once the season is finalized (PRD §4.8).
+  if (project.season.finalizedAt) return;
   const rules = resolveRules(project.season.scoringRules);
   const labelers = (Array.isArray(pr.linkedIssueLabelers) ? pr.linkedIssueLabelers : []) as Labeler[];
 
@@ -115,5 +117,12 @@ export async function scoreMentorPoints(pullRequestId: string) {
         };
       }),
     });
+    await enqueueJobs(
+      [...new Set(plan.map((entry) => entry.userId))].map((userId) => ({
+        kind: "LEADERBOARD_REFRESH" as const,
+        payload: { seasonId: project.seasonId, kind: "mentor" as const, id: userId },
+      })),
+      { client: tx },
+    );
   });
 }

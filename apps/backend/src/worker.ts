@@ -1,6 +1,12 @@
 import { prisma } from "@repo/db";
-import { istDay } from "@repo/scoring";
-import { enqueueJobs } from "@repo/scoring/server";
+import { autoFreezeDue, istDay } from "@repo/scoring";
+import {
+  enqueueJobs,
+  freezeLeaderboard,
+  liveBoardsOf,
+  rebuildLiveBoard,
+  verifyBoard,
+} from "@repo/scoring/server";
 import { env, githubAppConfigured } from "./env";
 import { NotConfiguredError, RateLimitError } from "./github/client";
 import { awardBadgesForSeason, syncBadgeDefinitions } from "./scoring/badges";
@@ -60,6 +66,43 @@ async function finishExpiredGraceWindows(now: Date) {
   for (const pr of due) await scorePullRequest(pr.id, now);
 }
 
+/**
+ * Points held back by the daily cap count from a later 00:00 IST, with no new ledger entry then.
+ * Once that moment passes, refresh those contributors' leaderboard entries.
+ */
+async function refreshDeferredPoints(since: Date, now: Date) {
+  const due = await prisma.$queryRaw<{ seasonId: string; userId: string }[]>`
+    SELECT DISTINCT "seasonId", "userId" FROM "ScoreEvent"
+    WHERE "effectiveAt" > ${since} AND "effectiveAt" <= ${now} AND "createdAt" < "effectiveAt"
+  `;
+  await enqueueJobs(
+    due.map((row) => ({
+      kind: "LEADERBOARD_REFRESH" as const,
+      payload: { seasonId: row.seasonId, kind: "user" as const, id: row.userId },
+    })),
+  );
+}
+
+/** The public board freezes by itself 48 hours before coding ends (PRD §4.8). */
+async function autoFreeze(now: Date) {
+  const season = await prisma.season.findFirst({ where: { isActive: true } });
+  if (!season || !autoFreezeDue(season, now)) return;
+  await freezeLeaderboard(season.id, null, now);
+  console.log(`Leaderboard for ${season.slug} frozen automatically`);
+}
+
+/** Compares every live board in Redis with a fresh SQL computation; rebuilds any that differ. */
+async function verifyLeaderboards(now: Date) {
+  const season = await prisma.season.findFirst({ where: { isActive: true } });
+  if (!season) return;
+  for (const board of await liveBoardsOf(season.id, now)) {
+    const result = await verifyBoard(season.id, board, now);
+    if (result.ok) continue;
+    console.warn(`Leaderboard ${result.board} differed from SQL; rebuilding`, result.differences);
+    await rebuildLiveBoard(season.id, board);
+  }
+}
+
 async function nightly(now: Date) {
   const repos = await prisma.projectRepo.findMany({
     where: {
@@ -87,6 +130,7 @@ async function nightly(now: Date) {
   );
   const season = await prisma.season.findFirst({ where: { isActive: true } });
   if (season) await awardBadgesForSeason(season.id, now);
+  await verifyLeaderboards(now).catch((error) => console.error("Leaderboard verification failed", error));
   // Housekeeping: finished jobs and raw deliveries aren't needed for long.
   await prisma.syncJob.deleteMany({
     where: { status: "DONE", finishedAt: { lt: new Date(now.getTime() - 14 * 24 * HOUR_MS) } },
@@ -104,6 +148,8 @@ function istHour(date: Date) {
 export function startWorker() {
   let stopping = false;
   let lastNightly: string | null = null;
+  // Look back a day on start, in case the worker was down at midnight.
+  let deferredCheckedAt = new Date(Date.now() - 26 * HOUR_MS);
 
   if (!githubAppConfigured()) {
     console.warn(
@@ -120,6 +166,9 @@ export function startWorker() {
     try {
       await releaseStaleJobs();
       await finishExpiredGraceWindows(now);
+      await refreshDeferredPoints(deferredCheckedAt, now);
+      deferredCheckedAt = now;
+      await autoFreeze(now);
       const today = istDay(now);
       if (lastNightly !== today && istHour(now) >= NIGHTLY_IST_HOUR && githubAppConfigured()) {
         lastNightly = today;

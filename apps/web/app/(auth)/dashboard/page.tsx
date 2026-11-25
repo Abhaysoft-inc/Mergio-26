@@ -317,9 +317,13 @@ function StatTiles({ stats }: { stats: ContributorStats }) {
         label="Rank"
         value={stats.rank ? `#${stats.rank}` : "—"}
         detail={
-          stats.rank && stats.rankedContributors
-            ? `of ${stats.rankedContributors} ranked`
-            : "Score a PR to get ranked"
+          stats.leaderboardPhase !== "live"
+            ? stats.leaderboardPhase === "final"
+              ? "Final rank"
+              : "Frozen rank · your points still count"
+            : stats.rank && stats.rankedContributors
+              ? `of ${stats.rankedContributors} ranked`
+              : "Score a PR to get ranked"
         }
       />
       <Tile
