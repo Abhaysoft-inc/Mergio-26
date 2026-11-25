@@ -1,11 +1,18 @@
-import { footerColumns, footerFacts, organiser } from "@/lib/content";
+import {
+  accountLink,
+  footerColumns,
+  footerFacts,
+  organiser,
+  type Viewer,
+} from "@/lib/content";
 import { Crystal } from "./art/crystal";
 import { SnowLedge } from "./art/snow-ledge";
 import { Icon } from "./icon";
 
 // A frosted card with snow and icicles on top, sitting right under the final pine forest like
 // snowy ground, and a large faint wordmark as the sign-off.
-export function SiteFooter() {
+export function SiteFooter({ viewer }: { viewer: Viewer }) {
+  const account = accountLink(viewer);
   return (
     <footer className="site-footer">
       <Crystal className="f1" />
@@ -37,11 +44,15 @@ export function SiteFooter() {
                 <div key={column.title}>
                   <h3>{column.title}</h3>
                   <ul>
-                    {column.links.map(({ label, href }) => (
-                      <li key={label}>
-                        <a href={href}>{label}</a>
-                      </li>
-                    ))}
+                    {column.links.map((link) => {
+                      const { label, href } =
+                        "account" in link && link.account ? account : link;
+                      return (
+                        <li key={label}>
+                          <a href={href}>{label}</a>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               ))}

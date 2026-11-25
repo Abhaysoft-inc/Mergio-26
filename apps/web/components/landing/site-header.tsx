@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { links, navItems } from "@/lib/content";
+import { accountLink, links, navItems, type Viewer } from "@/lib/content";
 import { Icon } from "./icon";
 import { ThemeToggle } from "./theme-toggle";
 
-export function SiteHeader() {
+export function SiteHeader({ viewer }: { viewer: Viewer }) {
+  const account = accountLink(viewer);
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -62,9 +63,9 @@ export function SiteHeader() {
         </nav>
         <span className="sep" aria-hidden="true" />
         <ThemeToggle />
-        <a className="nav-cta" href={links.register}>
-          <Icon name="github" size={15} />
-          Register
+        <a className="nav-cta" href={account.href}>
+          <Icon name={account.icon} size={15} />
+          {account.label}
         </a>
         <button
           className="menu-btn"

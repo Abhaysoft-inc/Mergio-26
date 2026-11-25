@@ -12,29 +12,32 @@ import { SiteFooter } from "@/components/landing/site-footer";
 import { SiteHeader } from "@/components/landing/site-header";
 import { NightSnow } from "@/components/landing/snow";
 import { Timeline } from "@/components/landing/timeline";
+import { getViewer } from "@/lib/dal";
 
-export default function HomePage() {
+export default async function HomePage() {
+  // Signed-in visitors see "Dashboard" where others see "Register".
+  const viewer = await getViewer();
   return (
     <>
       <IconSprite />
-      <SiteHeader />
+      <SiteHeader viewer={viewer} />
       <main id="top">
-        <Hero />
+        <Hero viewer={viewer} />
         {/* Continuous winter-night background behind every section below the hero. */}
         <div className="night">
-          <About />
+          <About viewer={viewer} />
           <HowItWorks />
           <Scoring />
           <Timeline />
           <Prizes />
           <Maintainers />
           <Faq />
-          <FinalCta />
+          <FinalCta viewer={viewer} />
           {/* Last, so the snow paints in front of the scene art but still behind all content. */}
           <NightSnow />
         </div>
       </main>
-      <SiteFooter />
+      <SiteFooter viewer={viewer} />
       <ScrollEffects />
     </>
   );
