@@ -1,8 +1,11 @@
 import { prisma } from "@repo/db";
 import type { Metadata } from "next";
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import type { IconName } from "@/components/landing/icon";
 import { Icon } from "@/components/landing/icon";
 import { getSession } from "@/lib/dal";
+import { ensureGithubLogin } from "@/lib/github-login";
 import { ROLES, parseRole, roleInfo, type RoleName } from "@/lib/registration";
 import { signInWithGitHub, signOutAction } from "../actions";
 import { RegisterForm } from "./register-form";
@@ -30,7 +33,9 @@ export default async function RegisterPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const preselect = parseRole((await searchParams).role);
+  const params = await searchParams;
+  const preselect = parseRole(params.role);
+  const fromSignIn = params.signin === "1";
   const session = await getSession();
 
   if (!session) {
@@ -116,13 +121,22 @@ export default async function RegisterPage({
   }
 
   const { user } = session;
-  const [profile, registrations] = await Promise.all([
+  const [profile, registrations, githubLogin] = await Promise.all([
     prisma.profile.findUnique({ where: { userId: user.id } }),
     prisma.registration.findMany({
       where: { userId: user.id },
       select: { role: true },
     }),
+    ensureGithubLogin(user),
   ]);
+
+  // Registered people only stay here to add a role they don't hold yet.
+  const held = new Set(registrations.map((registration) => registration.role));
+  const allHeld = ROLES.every((role) => held.has(role));
+  const wantsNewRole = preselect !== null && !held.has(preselect);
+  if (registrations.length > 0 && (allHeld || (fromSignIn && !wantsNewRole))) {
+    redirect("/dashboard");
+  }
 
   return (
     <section className="auth-card panel">
@@ -131,7 +145,7 @@ export default async function RegisterPage({
         {user.image && <img src={user.image} alt="" width={44} height={44} />}
         <div>
           <b>{user.name}</b>
-          <span>@{user.githubLogin}</span>
+          <span>{githubLogin ? `@${githubLogin}` : user.email}</span>
         </div>
         <form action={signOutAction}>
           <button className="btn btn-ghost btn-sm" type="submit">
@@ -144,9 +158,17 @@ export default async function RegisterPage({
           ? "Add another role"
           : "Complete your registration"}
       </h1>
+      {registrations.length > 0 && (
+        <p className="auth-lead">
+          <Link href="/dashboard" className="font-semibold text-(color:--ice) hover:underline">
+            ← Back to your dashboard
+          </Link>
+        </p>
+      )}
       <RegisterForm
         defaults={{
           college: profile?.college ?? "",
+          collegeId: profile?.collegeMatch === "USER" ? profile.collegeId : null,
           graduationYear: profile ? String(profile.graduationYear) : "",
           phone: profile?.phone ?? "",
           discord: profile?.discord ?? "",

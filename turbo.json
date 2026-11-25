@@ -30,7 +30,19 @@
         "GITHUB_CLIENT_ID",
         "GITHUB_CLIENT_SECRET",
         "ADMIN_GITHUB_LOGINS",
-        "AUTH_COOKIE_DOMAIN"
+        "SUPER_ADMIN_GITHUB_LOGINS",
+        "REDIS_URL",
+        "UPSTASH_REDIS_REST_URL",
+        "UPSTASH_REDIS_REST_TOKEN",
+        "AUTH_COOKIE_DOMAIN",
+        "RESEND_API_KEY",
+        "EMAIL_FROM",
+        "GITHUB_APP_SLUG",
+        "GITHUB_WEBHOOK_SECRET",
+        "GITHUB_APP_ID",
+        "GITHUB_APP_PRIVATE_KEY",
+        "RUN_WORKER",
+        "WORKER_CONCURRENCY"
       ]
     },
     "lint": {

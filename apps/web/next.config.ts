@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@repo/db"],
-  serverExternalPackages: ["pg"],
+  transpilePackages: ["@repo/db", "@repo/scoring"],
+  serverExternalPackages: ["pg", "ioredis"],
   typescript: {
     ignoreBuildErrors: true,
   },

@@ -5,6 +5,20 @@
 Mergio is a premier nationwide open-source program designed to foster engineering excellence, open-source adoption, and large-scale collaborative development across India. Built to connect ambitious developers, active repository maintainers, and seasoned mentors, Mergio provides a high-impact platform where talent collaborates on production-grade software.
 
 ---
+```
+apps/
+  web/                    Next.js 16 app (http://localhost:3001)
+  super-admin/            Next.js 16 super admin dashboard (http://localhost:3002)
+  backend/                Express 5 + TypeScript API (http://localhost:4000)
+packages/
+  db/                     Prisma 7 schema, migrations and the shared `prisma` client
+  scoring/                Scoring engine (pure, unit-tested) and shared ranking/queue helpers
+  ui/                     Shared React components (Tailwind CSS v4)
+  tailwind-config/        Shared Tailwind theme and PostCSS config
+  eslint-config/          Shared ESLint configs
+  typescript-config/      Shared tsconfig files
+docker-compose.yml        Local PostgreSQL and Redis for development
+```
 
 ## About Mergio
 

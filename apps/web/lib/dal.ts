@@ -1,8 +1,9 @@
 import "server-only";
 import { cache } from "react";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "./auth";
+import { ensureGithubLogin } from "./github-login";
 
 // Data access layer. This is the real permission check: proxy.ts only does a cheap
 // cookie check, so every page and action that needs a user must come through here.
@@ -16,5 +17,15 @@ export const getSession = cache(async () =>
 export async function requireUser() {
   const session = await getSession();
   if (!session) redirect("/register");
-  return session.user;
+  const { user } = session;
+  return user.githubLogin
+    ? user
+    : { ...user, githubLogin: await ensureGithubLogin(user) };
+}
+
+/** The signed-in organizer. Anyone else gets a 404, so admin pages don't reveal that they exist. */
+export async function requireAdmin() {
+  const user = await requireUser();
+  if (!user.isAdmin) notFound();
+  return user;
 }

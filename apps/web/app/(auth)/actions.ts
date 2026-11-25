@@ -1,10 +1,13 @@
 "use server";
 
 import { prisma } from "@repo/db";
+import { enqueueJobs } from "@repo/scoring/server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { refreshLeaderboardUsers, resolveCollege } from "@/lib/colleges";
 import { getSession } from "@/lib/dal";
+import { linkMentorInvites } from "@/lib/mentor-service";
 import {
   parseRole,
   registrationSchema,
@@ -14,7 +17,8 @@ import {
 export async function signInWithGitHub(formData: FormData) {
   // Only ever return to our own registration page. The role is validated, never echoed raw.
   const role = parseRole(formData.get("role")?.toString());
-  const callbackURL = role ? `/register?role=${role.toLowerCase()}` : "/register";
+  // "signin" lets the register page send people who are already registered on to their dashboard.
+  const callbackURL = role ? `/register?signin=1&role=${role.toLowerCase()}` : "/register?signin=1";
 
   const { url } = await auth.api.signInSocial({
     body: { provider: "github", callbackURL },
@@ -64,6 +68,8 @@ export async function registerAction(
 
   const data = parsed.data;
   const userId = session.user.id;
+  // Picked from the curated list, or matched through an organizer's alias, or neither yet.
+  const college = await resolveCollege(formData.get("collegeId")?.toString() || null, data.college);
 
   // Roles the person already holds keep their status; submitting again never resets a review.
   const existing = await prisma.registration.findMany({
@@ -71,6 +77,7 @@ export async function registerAction(
     select: { role: true },
   });
   const held = new Set(existing.map((registration) => registration.role));
+  const before = await prisma.profile.findUnique({ where: { userId }, select: { collegeId: true } });
   const newRoles = data.roles.filter((role) => !held.has(role));
 
   await prisma.$transaction([
@@ -78,7 +85,7 @@ export async function registerAction(
       where: { userId },
       create: {
         userId,
-        college: data.college,
+        ...college,
         graduationYear: data.graduationYear,
         phone: data.phone,
         discord: data.discord,
@@ -87,7 +94,7 @@ export async function registerAction(
       },
       // The original code-of-conduct acceptance time is kept.
       update: {
-        college: data.college,
+        ...college,
         graduationYear: data.graduationYear,
         phone: data.phone ?? null,
         discord: data.discord ?? null,
@@ -105,6 +112,16 @@ export async function registerAction(
       skipDuplicates: true,
     }),
   ]);
+
+  // PRs merged before the contributor registered were NOT_REGISTERED; score them now (F-06 edge case).
+  if (newRoles.includes("CONTRIBUTOR")) {
+    await enqueueJobs([{ kind: "USER_RESCORE", payload: { userId } }]);
+  }
+  // College and graduation year show on the leaderboards.
+  const left = before?.collegeId && before.collegeId !== college.collegeId ? [before.collegeId] : [];
+  await refreshLeaderboardUsers([userId], left);
+  // Project admins may have invited this GitHub login as a mentor before they signed up.
+  await linkMentorInvites(session.user);
 
   redirect("/dashboard");
 }
