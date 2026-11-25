@@ -64,6 +64,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+          # Its automatic pnpm cache needs pnpm, which is installed in the next step; the
+          # pnpm store is cached below instead.
+          package-manager-cache: false
 
       - name: Install pnpm
         run: npm install -g pnpm@12.6.0
