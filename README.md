@@ -11,6 +11,7 @@ apps/
   backend/                Express 5 + TypeScript API (http://localhost:4000)
 packages/
   db/                     Prisma 7 schema, migrations and the shared `prisma` client
+  scoring/                Scoring engine (pure, unit-tested) and shared ranking/queue helpers
   ui/                     Shared React components (Tailwind CSS v4)
   tailwind-config/        Shared Tailwind theme and PostCSS config
   eslint-config/          Shared ESLint configs
@@ -118,6 +119,62 @@ JSON endpoints under `/api/v1`, authenticated with the same session cookie as th
 | `GET /projects/{id}/install-status` | anyone (live), owner and organizers | GitHub App tracking per repo |
 | `GET /admin/projects/{id}/review` | organizers | Application, history and allowed decisions |
 | `POST /admin/projects/{id}/review` | organizers | `{"decision", "seenStatus"?, "publicReason"?, "internalNote"?}` |
+
+### PR tracking and scoring
+
+Merged pull requests on tracked repos are scored automatically (issues #25 F-06 and #26 F-07):
+
+1. GitHub sends webhooks to `POST /api/v1/webhooks/github` (in `apps/web`). It checks `X-Hub-Signature-256`, stores the delivery in `WebhookDelivery` (the delivery id is the key, so redeliveries are ignored), queues a `SyncJob` and answers 202. Nothing is processed in the request.
+2. The sync worker (in `apps/backend`, started with the API) claims jobs from the Postgres queue, refetches the PR from GitHub in one GraphQL call (labels, merge info, approving reviews, the issues it closes, label history), stores it in `PullRequest` and scores it.
+3. Scoring is `evaluatePullRequest()` in `packages/scoring`: a pure function that decides whether the PR counts and what it is worth, with one of 14 fixed reason codes when it doesn't. The difference between that and what the PR already has on the ledger is appended to `ScoreEvent`. Entries are never edited: a relabel, a late bonus, an invalid or spam label or a revert within 7 days each add a new entry or a reversal, so scoring is idempotent and seeing a PR twice never double counts.
+4. Nightly at 03:00 IST, every tracked repo is reconciled (PRs updated since the last sync are refetched), which recovers anything a webhook outage missed. PRs merged without a level label wait 72 hours for a mentor to add one, then are scored or marked `NO_LEVEL_LABEL`.
+
+Default labels and points, overridable per season in `Season.scoringRules`: `wos` (program), `level:beginner` 10, `level:intermediate` 25, `level:advanced` 45, `bonus:quality` +10, `bonus:docs` +5, `bonus:tests` +5, `wos:invalid`, `wos:spam`. The level can come from the issue the PR closes. Caps: 8 beginner PRs per contributor per project, 40 points per contributor per IST day (the overflow counts from the next day), 2 quality bonuses per project per week, and diffs under 3 non-blank lines score as beginner. Three spam strikes suspend a contributor's scoring. The engine's tests: `pnpm --filter @repo/scoring test`.
+
+**Nothing scores until the season has a contribution window.** Until the season admin page (F-03) exists, set it with:
+
+```sh
+pnpm --filter backend season:window 2026-12-01 2026-12-31   # IST days; rescores every PR
+pnpm --filter backend resync [owner/name]                    # reconcile now instead of nightly
+```
+
+#### GitHub App setup
+
+1. **Settings > Developer settings > GitHub Apps > New GitHub App.** Webhook URL: `https://mergio.in/api/v1/webhooks/github` (for local development, a tunnel such as `smee.io` to `http://localhost:3001/api/v1/webhooks/github`). Generate a webhook secret and put it in `GITHUB_WEBHOOK_SECRET` in `apps/web/.env`.
+2. Repository permissions: Pull requests (read), Issues (read and write, to create the program labels), Metadata (read), Contents (read). Subscribe to: Pull request, Pull request review, Issues, Label, Repository. Installation events are sent automatically.
+3. Put the App ID in `GITHUB_APP_ID` and the generated private key in `GITHUB_APP_PRIVATE_KEY` (one line, `\n` for line breaks) in `apps/backend/.env`, and the app's URL name in `GITHUB_APP_SLUG` in `apps/web/.env` for the install links.
+
+When a project admin installs the app, its repos switch to "Tracking active", the program labels are created and the repos are synced. Uninstalling suspends tracking; points already earned stay. Without the App ID and key, jobs wait in the queue (they are retried hourly) instead of failing.
+
+### Contributor dashboard
+
+Contributors see their points, overall and weekly rank (Monday 00:00 IST), progress to the next badge, their pull requests with status (open, scored, awaiting a label, not eligible with the exact reason, invalidated), a "Raise a dispute" link per merged PR for 7 days after its merge or last score change, and recommended issues at their level. `/dashboard/prs` lists every PR with status, level and project filters; `/dashboard/points` is the ledger with the reason and PR link for each entry.
+
+| Method and path | What |
+| --- | --- |
+| `GET /me/stats` | Points, held points, rank, weekly rank, PR counts, badges and next-badge progress |
+| `GET /me/pull-requests?status=&level=&project=&page=` | The contributor's PRs this season; `status` is `open`, `scored`, `awaiting`, `not-eligible`, `invalidated` or `closed` |
+| `GET /me/score-events?page=` | The points ledger, newest first |
+| `POST /disputes` | `{"pullRequestId", "category", "text", "evidenceUrls"?}`; one unresolved dispute per PR |
+
+### Mentors and project admins
+
+Project admins add mentors by GitHub username on their project dashboard (`/dashboard/projects/{slug}`, issue #24 F-05). Someone without a Mergio account gets an invite: the row links to them when they sign in, and the page shows the sign-up link to send them. A mentor becomes active once an organizer approves their mentor registration at `/admin/mentors` (they are emailed). Removing a mentor ends their access at once; mentor points they earned stay. Active mentors are listed on the public project page, and project staff (the admin and active mentors) can't score as contributors on their own project (`AUTHOR_IS_MENTOR`).
+
+**Mentor view** (`/dashboard/mentor`, for mentors and project admins): the projects they mentor, merged PRs waiting for a label (urgent while inside the 72-hour window, soonest deadline first; ones past it still score when labelled), recently scored PRs, their mentor points, a warning for repos where their GitHub role is below triage, and "Flag the author" on each PR.
+
+**Project admin view** (`/dashboard/projects/{slug}`): repo health (accepted, GitHub App installed, program labels present), mentors with their status and missing triage permission, PR stats, contributors by points, recent PRs, and links to edit the project and repos.
+
+Mentor points (PRD §4.5) are a separate ledger, `MentorPointEvent`: +5 per approving review on a PR that scores, and +2 when an issue the mentor labelled (the level label, else the program label) gets a scored PR. They are taken back if the PR stops scoring. The worker checks each mentor's GitHub role per repo when they are added or approved and nightly (needs the app's Metadata read permission), and records which program labels each repo still lacks.
+
+| Method and path | Who | What |
+| --- | --- | --- |
+| `GET /mentor/queue` | mentors, project admins | Merged PRs on your projects that need a label |
+| `POST /projects/{id}/mentors` | project admin, organizers | `{"githubLogin"}`; returns the mentor's state and an `inviteUrl` when they need to sign up |
+| `DELETE /projects/{id}/mentors/{mentorId}` | project admin, organizers | Removes a mentor |
+| `POST /flags` | project staff, organizers | `{"pullRequestId", "category", "note"}`; flags the PR's author for organizers |
+| `GET /admin/participants?role=mentor&status=pending` | organizers | Mentor or maintainer registrations |
+| `POST /admin/participants/{id}/review` | organizers | `{"decision": "APPROVED" \| "REJECTED"}` |
 
 ### Email
 

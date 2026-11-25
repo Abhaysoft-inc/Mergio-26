@@ -1,4 +1,5 @@
 import { prisma } from "@repo/db";
+import { activeMentor } from "@repo/scoring/server";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -28,6 +29,12 @@ const loadProject = cache(async (slug: string) => {
     include: {
       repos: { where: { removedAt: null }, orderBy: { createdAt: "asc" } },
       owner: { select: { name: true, githubLogin: true } },
+      // Active mentors only: invites and unapproved mentors aren't shown publicly.
+      mentors: {
+        where: activeMentor,
+        orderBy: { createdAt: "asc" },
+        select: { id: true, user: { select: { name: true, githubLogin: true } } },
+      },
     },
   });
   if (!project) return null;
@@ -172,6 +179,31 @@ export default async function ProjectPage({ params }: Params) {
               </a>
             )}
           </section>
+
+          {project.mentors.length > 0 && (
+            <section className="panel p-6">
+              <h2 className="font-mono text-xs tracking-widest text-(color:--muted) uppercase">
+                Mentors
+              </h2>
+              <ul className="mt-3 mb-0 list-none space-y-2 p-0 text-sm">
+                {project.mentors.map((mentor) =>
+                  mentor.user?.githubLogin ? (
+                    <li key={mentor.id}>
+                      <a
+                        href={`https://github.com/${mentor.user.githubLogin}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:text-(color:--ice)"
+                      >
+                        {mentor.user.name}{" "}
+                        <span className="font-mono text-(color:--dim)">@{mentor.user.githubLogin}</span>
+                      </a>
+                    </li>
+                  ) : null,
+                )}
+              </ul>
+            </section>
+          )}
 
           <section className="panel p-6">
             <h2 className="font-mono text-xs tracking-widest text-(color:--muted) uppercase">

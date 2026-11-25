@@ -9,7 +9,11 @@ import {
   unauthorized,
 } from "@/lib/api";
 import { normaliseProjectBody, repoUrl } from "@/lib/projects";
-import { saveApplication, updateApprovedDetails } from "@/lib/project-service";
+import {
+  deleteProject,
+  saveApplication,
+  updateApprovedDetails,
+} from "@/lib/project-service";
 import { activeSeason, canSeeUnpublished } from "@/lib/projects-server";
 
 type Context = { params: Promise<{ ref: string }> };
@@ -97,4 +101,16 @@ export async function PATCH(request: Request, { params }: Context) {
   return result.ok
     ? json({ project: result.project, repoProblems: result.repoProblems })
     : failure(result);
+}
+
+/**
+ * DELETE /api/v1/projects/{id} — deletes your project. Once it has pull requests on record, only
+ * an organizer can.
+ */
+export async function DELETE(_request: Request, { params }: Context) {
+  const user = await apiUser();
+  if (!user) return unauthorized();
+  const { ref: id } = await params;
+  const result = await deleteProject(user, id);
+  return result.ok ? json({ deleted: true }) : failure(result);
 }

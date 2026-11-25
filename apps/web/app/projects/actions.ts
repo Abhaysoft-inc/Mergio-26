@@ -7,6 +7,7 @@ import type { ProjectFormState } from "@/lib/projects";
 import {
   addRepo,
   copyFromLastSeason,
+  deleteProject,
   removeRepo,
   saveApplication,
   submitApplication,
@@ -164,4 +165,20 @@ export async function copyProjectAction(
   const result = await copyFromLastSeason(session.user, sourceId);
   if (!result.ok) return { error: result.message };
   redirect(`/projects/${result.project.slug}/manage?copied=1`);
+}
+
+/** Deletes a project for good, then goes to `redirectTo` (a page that still exists). */
+export async function deleteProjectAction(
+  projectId: string,
+  redirectTo: string,
+): Promise<RepoActionState> {
+  const session = await getSession();
+  if (!session)
+    return { error: "Your session expired. Sign in with GitHub again." };
+  const result = await deleteProject(session.user, projectId);
+  if (!result.ok) return { error: result.message };
+  revalidatePath("/projects", "layout");
+  revalidatePath("/admin/projects", "layout");
+  revalidatePath("/dashboard", "layout");
+  redirect(redirectTo);
 }

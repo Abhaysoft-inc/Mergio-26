@@ -21,6 +21,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             Project reviews
           </Link>
           <Link
+            href="/admin/mentors"
+            className="rounded-full px-3 py-1.5 text-(color:--muted) transition-colors hover:text-(color:--text)"
+          >
+            Mentors
+          </Link>
+          <Link
             href="/dashboard"
             className="rounded-full px-3 py-1.5 text-(color:--muted) transition-colors hover:text-(color:--text)"
           >

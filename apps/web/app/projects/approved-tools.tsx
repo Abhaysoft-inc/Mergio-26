@@ -252,3 +252,40 @@ export function CopyProjectButton({
     </form>
   );
 }
+
+/** Deletes a whole project after confirming. `warning` says what will be lost. */
+export function DeleteProjectButton({
+  action,
+  name,
+  warning,
+}: {
+  action: () => Promise<RepoActionState>;
+  name: string;
+  warning: string;
+}) {
+  const [state, formAction, pending] = useActionState(action, {});
+  return (
+    <form
+      action={formAction}
+      onSubmit={(event) => {
+        if (!window.confirm(`Delete ${name}? ${warning} This can't be undone.`)) {
+          event.preventDefault();
+        }
+      }}
+      className="flex flex-col items-start gap-2"
+    >
+      <button
+        className="btn btn-ghost btn-sm text-[#E5484D]"
+        type="submit"
+        disabled={pending}
+      >
+        {pending ? "Deleting…" : "Delete project"}
+      </button>
+      {state.error && (
+        <p className="m-0 text-sm text-[#E5484D]" role="alert">
+          {state.error}
+        </p>
+      )}
+    </form>
+  );
+}

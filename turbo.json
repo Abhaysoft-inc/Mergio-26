@@ -33,7 +33,12 @@
         "AUTH_COOKIE_DOMAIN",
         "RESEND_API_KEY",
         "EMAIL_FROM",
-        "GITHUB_APP_SLUG"
+        "GITHUB_APP_SLUG",
+        "GITHUB_WEBHOOK_SECRET",
+        "GITHUB_APP_ID",
+        "GITHUB_APP_PRIVATE_KEY",
+        "RUN_WORKER",
+        "WORKER_CONCURRENCY"
       ]
     },
     "lint": {
