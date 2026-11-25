@@ -12,7 +12,9 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@repo/db": "workspace:*"
+    "@repo/db": "workspace:*",
+    "@upstash/redis": "1.41.0",
+    "ioredis": "6.0.0"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",

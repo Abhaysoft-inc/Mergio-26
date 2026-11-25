@@ -3,6 +3,7 @@
 
 export * from "./badges";
 export * from "./evaluate";
+export * from "./leaderboard";
 export * from "./ledger";
 export * from "./mentor";
 export * from "./reasons";

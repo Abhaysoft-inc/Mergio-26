@@ -5,6 +5,7 @@ import { enqueueJobs } from "@repo/scoring/server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { refreshLeaderboardUsers, resolveCollege } from "@/lib/colleges";
 import { getSession } from "@/lib/dal";
 import { linkMentorInvites } from "@/lib/mentor-service";
 import {
@@ -67,6 +68,8 @@ export async function registerAction(
 
   const data = parsed.data;
   const userId = session.user.id;
+  // Picked from the curated list, or matched through an organizer's alias, or neither yet.
+  const college = await resolveCollege(formData.get("collegeId")?.toString() || null, data.college);
 
   // Roles the person already holds keep their status; submitting again never resets a review.
   const existing = await prisma.registration.findMany({
@@ -74,6 +77,7 @@ export async function registerAction(
     select: { role: true },
   });
   const held = new Set(existing.map((registration) => registration.role));
+  const before = await prisma.profile.findUnique({ where: { userId }, select: { collegeId: true } });
   const newRoles = data.roles.filter((role) => !held.has(role));
 
   await prisma.$transaction([
@@ -81,7 +85,7 @@ export async function registerAction(
       where: { userId },
       create: {
         userId,
-        college: data.college,
+        ...college,
         graduationYear: data.graduationYear,
         phone: data.phone,
         discord: data.discord,
@@ -90,7 +94,7 @@ export async function registerAction(
       },
       // The original code-of-conduct acceptance time is kept.
       update: {
-        college: data.college,
+        ...college,
         graduationYear: data.graduationYear,
         phone: data.phone ?? null,
         discord: data.discord ?? null,
@@ -113,6 +117,9 @@ export async function registerAction(
   if (newRoles.includes("CONTRIBUTOR")) {
     await enqueueJobs([{ kind: "USER_RESCORE", payload: { userId } }]);
   }
+  // College and graduation year show on the leaderboards.
+  const left = before?.collegeId && before.collegeId !== college.collegeId ? [before.collegeId] : [];
+  await refreshLeaderboardUsers([userId], left);
   // Project admins may have invited this GitHub login as a mentor before they signed up.
   await linkMentorInvites(session.user);
 

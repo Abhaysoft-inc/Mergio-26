@@ -1,5 +1,11 @@
 import { prisma, type SyncJob } from "@repo/db";
-import type { JobPayloads } from "@repo/scoring/server";
+import {
+  enqueueJobs,
+  refreshCollege,
+  refreshMentor,
+  refreshUser,
+  type JobPayloads,
+} from "@repo/scoring/server";
 import { scoreMentorPoints } from "../scoring/mentor-points";
 import { scorePullRequest } from "../scoring/score-pr";
 import { syncIssue } from "./issue";
@@ -69,8 +75,26 @@ export async function runJob(job: SyncJob) {
       const payload = job.payload as JobPayloads["MENTOR_ACCESS"];
       return checkMentorAccess(payload.projectId);
     }
+    case "LEADERBOARD_REFRESH": {
+      const payload = job.payload as JobPayloads["LEADERBOARD_REFRESH"];
+      return refreshLeaderboardEntry(payload);
+    }
   }
 }
 
-/** Jobs that need the GitHub App (everything except rescoring stored PRs). */
-export const needsGitHub = (job: SyncJob) => job.kind !== "USER_RESCORE";
+/** Swaps one entry on the live leaderboards (F-08); a college's total follows its members. */
+async function refreshLeaderboardEntry(payload: JobPayloads["LEADERBOARD_REFRESH"]) {
+  if (payload.kind === "mentor") return refreshMentor(payload.seasonId, payload.id);
+  if (payload.kind === "college") return refreshCollege(payload.seasonId, payload.id);
+  const colleges = await refreshUser(payload.seasonId, payload.id);
+  await enqueueJobs(
+    colleges.map((id) => ({
+      kind: "LEADERBOARD_REFRESH" as const,
+      payload: { seasonId: payload.seasonId, kind: "college" as const, id },
+    })),
+  );
+}
+
+/** Jobs that need the GitHub App (everything except work on data already stored). */
+export const needsGitHub = (job: SyncJob) =>
+  job.kind !== "USER_RESCORE" && job.kind !== "LEADERBOARD_REFRESH";

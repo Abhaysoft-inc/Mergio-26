@@ -38,7 +38,7 @@ export async function isContributor(userId: string) {
 
 export async function contributorStats(userId: string, season: SeasonInfo, now = new Date()) {
   const [standing, earned, counts] = await Promise.all([
-    standingOf(season.id, userId, now),
+    standingOf(season, userId, now),
     prisma.userBadge.findMany({
       where: { userId, seasonId: season.id },
       orderBy: { earnedAt: "asc" },
@@ -63,6 +63,8 @@ export async function contributorStats(userId: string, season: SeasonInfo, now =
     weeklyPoints: standing.weeklyPoints,
     weeklyRank: standing.weeklyRank,
     weekStart: standing.weekStart,
+    /** "frozen" or "final" when the ranks are the snapshot's, not live. */
+    leaderboardPhase: standing.leaderboardPhase,
     pullRequests: {
       scored: badgeStats.scoredPrs,
       advanced: badgeStats.advancedPrs,

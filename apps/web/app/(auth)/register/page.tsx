@@ -168,6 +168,7 @@ export default async function RegisterPage({
       <RegisterForm
         defaults={{
           college: profile?.college ?? "",
+          collegeId: profile?.collegeMatch === "USER" ? profile.collegeId : null,
           graduationYear: profile ? String(profile.graduationYear) : "",
           phone: profile?.phone ?? "",
           discord: profile?.discord ?? "",

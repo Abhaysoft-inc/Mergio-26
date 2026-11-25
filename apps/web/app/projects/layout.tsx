@@ -21,6 +21,12 @@ export default async function ProjectsLayout({
             Projects
           </Link>
           <Link
+            href="/leaderboard"
+            className="rounded-full px-3 py-1.5 text-(color:--muted) transition-colors hover:text-(color:--text)"
+          >
+            Leaderboard
+          </Link>
+          <Link
             href={session ? "/dashboard" : "/register"}
             className="rounded-full px-3 py-1.5 text-(color:--muted) transition-colors hover:text-(color:--text)"
           >

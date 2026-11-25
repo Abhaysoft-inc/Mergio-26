@@ -20,6 +20,11 @@ export type JobPayloads = {
   USER_RESCORE: { userId: string };
   /** Checks each mentor's GitHub role on the project's repos (they need triage to label). */
   MENTOR_ACCESS: { projectId: string };
+  /**
+   * Re-reads one entry of the live leaderboards from the ledger (F-08): a contributor's boards,
+   * a mentor's entry, or a college's total. Serialized per entry by the dedupe key.
+   */
+  LEADERBOARD_REFRESH: { seasonId: string; kind: "user" | "mentor" | "college"; id: string };
 };
 
 export type Job = { [K in SyncJobKind]: { kind: K; payload: JobPayloads[K] } }[SyncJobKind];
@@ -41,6 +46,8 @@ export function dedupeKeyOf(job: Job): string {
       return `user:${job.payload.userId}`;
     case "MENTOR_ACCESS":
       return `mentor-access:${job.payload.projectId}`;
+    case "LEADERBOARD_REFRESH":
+      return `leaderboard:${job.payload.seasonId}:${job.payload.kind}:${job.payload.id}`;
   }
 }
 

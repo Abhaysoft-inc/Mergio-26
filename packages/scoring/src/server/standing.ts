@@ -1,15 +1,19 @@
-import { prisma, Prisma } from "@repo/db";
+import { prisma } from "@repo/db";
 import type { BadgeStats } from "../badges";
 import { istWeekKey, istWeekStart } from "../time";
+import { officialStanding, type LeaderboardSeason } from "./leaderboard/cache";
+import { boardRowsSql } from "./leaderboard/sql";
 
-// Ranks and stats straight from the ledger, the source of truth. F-08 puts a Redis cache in front
-// of the leaderboards; these queries are what it is rebuilt from, so ranks always match them.
+// Ranks and stats straight from the ledger, the source of truth. The leaderboards (F-08) serve the
+// same ranks from Redis; officialStanding() in ./leaderboard is what pages show.
 
 export type Rank = { rank: number; points: number; ranked: number };
 
 /**
- * A contributor's rank by points effective in [from, now]. Ties (PRD §4.7): more advanced PRs,
- * then more intermediate PRs, then whoever reached their total first. Null when unranked.
+ * A contributor's live rank by points effective in [from, now], from the same SQL the Redis
+ * leaderboards are rebuilt from (./leaderboard/sql.ts), so the order is the app-wide one: points,
+ * advanced PRs, intermediate PRs, reached first, then user id. `from` is a week's Monday 00:00 IST
+ * for the weekly board. Null when unranked.
  */
 export async function rankOf(
   seasonId: string,
@@ -17,41 +21,13 @@ export async function rankOf(
   now: Date,
   from: Date | null = null,
 ): Promise<Rank | null> {
-  const since = from ?? new Date(0);
-  const rows = await prisma.$queryRaw<{ rank: bigint; points: number; ranked: bigint }[]>(
-    Prisma.sql`
-      WITH totals AS (
-        SELECT "userId", SUM("points")::int AS points, MAX("effectiveAt") AS reached_at
-        FROM "ScoreEvent"
-        WHERE "seasonId" = ${seasonId} AND "effectiveAt" >= ${since} AND "effectiveAt" <= ${now}
-        GROUP BY "userId"
-      ),
-      levels AS (
-        SELECT "authorId" AS "userId",
-               COUNT(*) FILTER (WHERE "level" = 'ADVANCED') AS advanced,
-               COUNT(*) FILTER (WHERE "level" = 'INTERMEDIATE') AS intermediate
-        FROM "PullRequest"
-        WHERE "seasonId" = ${seasonId} AND "scoreStatus" = 'SCORED' AND "authorId" IS NOT NULL
-          AND "mergedAt" >= ${since} AND "mergedAt" <= ${now}
-        GROUP BY "authorId"
-      ),
-      ranked AS (
-        SELECT t."userId", t.points,
-               RANK() OVER (
-                 ORDER BY t.points DESC,
-                          COALESCE(l.advanced, 0) DESC,
-                          COALESCE(l.intermediate, 0) DESC,
-                          t.reached_at ASC
-               ) AS rank
-        FROM totals t LEFT JOIN levels l ON l."userId" = t."userId"
-        WHERE t.points > 0
-      )
-      SELECT rank, points, (SELECT COUNT(*) FROM ranked) AS ranked
-      FROM ranked WHERE "userId" = ${userId}
-    `,
+  const rows = await boardRowsSql(
+    seasonId,
+    from ? { family: "weekly", week: istWeekKey(from) } : { family: "overall" },
+    now,
   );
-  const row = rows[0];
-  return row ? { rank: Number(row.rank), points: row.points, ranked: Number(row.ranked) } : null;
+  const row = rows.find((entry) => entry.id === userId);
+  return row ? { rank: row.rank, points: row.points, ranked: rows.length } : null;
 }
 
 /** Points effective now, and points written but held back by the daily cap. */
@@ -96,20 +72,28 @@ export async function badgeStatsOf(
   };
 }
 
-/** Overall and weekly (Monday 00:00 IST onwards) standing. */
-export async function standingOf(seasonId: string, userId: string, now: Date) {
+/**
+ * Live points (overall, held back by the daily cap, and this week's) with the official ranks: live
+ * normally, the snapshot's while the leaderboard is frozen or final. Ranks come from the
+ * leaderboard cache, so the dashboard and the boards always show the same number.
+ */
+export async function standingOf(season: LeaderboardSeason, userId: string, now: Date) {
   const weekStart = istWeekStart(now);
-  const [overall, weekly, points] = await Promise.all([
-    rankOf(seasonId, userId, now),
-    rankOf(seasonId, userId, now, weekStart),
-    pointsOf(seasonId, userId, now),
+  const [points, weekly, official] = await Promise.all([
+    pointsOf(season.id, userId, now),
+    prisma.scoreEvent.aggregate({
+      where: { seasonId: season.id, userId, effectiveAt: { gte: weekStart, lte: now } },
+      _sum: { points: true },
+    }),
+    officialStanding(season, userId, now),
   ]);
   return {
     ...points,
-    rank: overall?.rank ?? null,
-    rankedContributors: overall?.ranked ?? null,
-    weeklyPoints: weekly?.points ?? 0,
-    weeklyRank: weekly?.rank ?? null,
+    rank: official.rank,
+    rankedContributors: official.rank ? official.rankedContributors : null,
+    weeklyPoints: weekly._sum.points ?? 0,
+    weeklyRank: official.weeklyRank,
     weekStart,
+    leaderboardPhase: official.phase,
   };
 }

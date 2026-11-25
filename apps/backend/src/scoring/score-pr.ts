@@ -8,7 +8,7 @@ import {
   resolveRules,
   type Evaluation,
 } from "@repo/scoring";
-import { projectStaffIds } from "@repo/scoring/server";
+import { enqueueJobs, ledgerOpen, projectStaffIds } from "@repo/scoring/server";
 import { awardBadges } from "./badges";
 import { scoreMentorPoints } from "./mentor-points";
 
@@ -65,6 +65,9 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
   const { repo } = pr;
   const { project } = repo;
   const { season } = project;
+  // A finalized season's ledger is locked (PRD §4.8): nothing is rescored until a Super Admin
+  // unfinalizes it.
+  if (season.finalizedAt) return;
   const rules = resolveRules(season.scoringRules);
 
   const authorId = pr.authorId ?? (await userForGithubId(pr.authorGithubId));
@@ -179,6 +182,8 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
   const evaluation = await prisma.$transaction(async (tx) => {
     // One contributor's PRs are scored one at a time, so the daily cap can't be overrun.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`score:${authorId}`}))`;
+    // Re-checked under the season lock: it may have been finalized since the check above.
+    if (!(await ledgerOpen(tx, season.id))) return;
 
     // Everything the outcome depends on is read under the lock, the per-project caps included.
     const evaluation = evaluate(await capCounts(tx));
@@ -240,6 +245,11 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
           idempotencyKey: `${pr.id}:${entry.ruleKey}:${existing.length + index}`,
         })),
       });
+      // In the same transaction, so a ledger change can't miss its leaderboard update.
+      await enqueueJobs(
+        [{ kind: "LEADERBOARD_REFRESH", payload: { seasonId: season.id, kind: "user", id: authorId } }],
+        { client: tx },
+      );
     }
 
     const net =
@@ -266,6 +276,9 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
     return evaluation;
   });
 
+  // Undefined when the season was finalized meanwhile: nothing was written, so there is nothing
+  // to follow up on.
+  if (!evaluation) return;
   await scoreMentorPoints(pr.id);
   if (evaluation.status === "SCORED") await awardBadges(season.id, authorId, now);
 }

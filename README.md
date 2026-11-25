@@ -16,7 +16,7 @@ packages/
   tailwind-config/        Shared Tailwind theme and PostCSS config
   eslint-config/          Shared ESLint configs
   typescript-config/      Shared tsconfig files
-docker-compose.yml        Local PostgreSQL for development
+docker-compose.yml        Local PostgreSQL and Redis for development
 ```
 
 ## Prerequisites
@@ -175,6 +175,27 @@ Mentor points (PRD §4.5) are a separate ledger, `MentorPointEvent`: +5 per appr
 | `POST /flags` | project staff, organizers | `{"pullRequestId", "category", "note"}`; flags the PR's author for organizers |
 | `GET /admin/participants?role=mentor&status=pending` | organizers | Mentor or maintainer registrations |
 | `POST /admin/participants/{id}/review` | organizers | `{"decision": "APPROVED" \| "REJECTED"}` |
+
+### Leaderboards
+
+Public boards at `/leaderboard` (issue F-08): overall, this week (resets Monday 00:00 IST), per project, colleges, and mentors, plus each college's students at `/leaderboard/colleges/{slug}`. Rows show rank, the change since 00:00 IST today, name and avatar, college, points, scored PRs by level and the top three badges. Search by name or GitHub login, filter by college, state and graduation year, 50 rows a page, and "Jump to me".
+
+**One ordering everywhere.** Every board, the dashboard rank and the SQL reference rank by: more points, more advanced PRs, more intermediate PRs, whoever reached that total first, then ascending id. Mentors have no PR levels, so for them it is points, reached first, then id. No two entries share a rank. The rule lives in `compareStandings()` in `packages/scoring/src/leaderboard.ts`.
+
+**Redis in front, Postgres as the record.** Boards are Redis sorted sets whose members encode the standing so that byte order is the ranking. A missing board is rebuilt from the ledger (`packages/scoring/src/server/leaderboard/sql.ts`). Each ledger write queues a `LEADERBOARD_REFRESH` job in the same transaction; the worker re-reads that person's standing from SQL and swaps their entries. Points held by the daily cap are refreshed when they take effect. Every read falls back to Postgres if Redis is unset or failing. Configure `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` for the web app on Vercel, and `REDIS_URL` (`rediss://` for Upstash over TLS) for the worker. Locally `docker compose up -d` also starts Redis on port 6380.
+
+**Freeze and finalize (PRD §4.8).** The board freezes by itself 48 hours before coding ends: a snapshot of every board is stored in Postgres and every rank shown (public boards, the API and contributors' dashboards) comes from it, while scoring carries on. Organizers can freeze, unfreeze (which also turns the automatic freeze off) and finalize at `/admin/leaderboard`. Finalizing takes a final snapshot and locks the ledger: no points, mentor points or badges are written. Only a Super Admin (`SUPER_ADMIN_GITHUB_LOGINS`, applied on sign-in) can unfinalize. PRs that arrived while it was finalized are scored on the next nightly resync.
+
+**Colleges.** `College` is a curated list (AICTE-approved technical institutions, UGC-recognised universities, and ones organizers add) with a state for filtering. Registration suggests colleges as people type; picking one links the profile. Anything typed instead is kept and can be mapped by an organizer at `/admin/leaderboard` (a `CollegeAlias`, which applies to everyone who typed that name). Import a dataset with `pnpm --filter backend colleges:import <file.csv>`; the expected columns are documented at the top of `apps/backend/src/scripts/colleges-import.ts`, and `apps/backend/data/colleges.dev.csv` is a small fixture for local work.
+
+| Method and path | Who | What |
+| --- | --- | --- |
+| `GET /leaderboards/{board}?page=&q=&college=&state=&gradYear=` | anyone | `{board}`: `overall`, `weekly`, `mentors`, `colleges`, `project:{slug}`, `college:{slug}` |
+| `GET /leaderboards/{board}/me` | signed in | Your row and its page (your college's on `colleges`) |
+| `POST /admin/leaderboard/{freeze\|unfreeze\|finalize\|unfinalize\|rebuild}` | organizers | JSON body (`{}`); `unfinalize` needs a Super Admin |
+| `GET /colleges?q=` | anyone | Up to 10 colleges, for the autocomplete |
+
+Checks: `pnpm --filter backend leaderboard:verify` compares every live board with a fresh SQL computation (the worker also does this nightly and rebuilds any that differ). For load testing, `leaderboard:seed --yes` makes a 20,000-user `loadtest` season active, `leaderboard:load --base <url>` reports p50/p95/p99, and `leaderboard:seed --drop` removes it and reactivates the previous season.
 
 ### Email
 
