@@ -7,6 +7,9 @@ import { healthRouter } from "./routes/health";
 
 export const app = express();
 
+// In production the API sits behind one reverse proxy (see deploy/README.md); trust its
+// X-Forwarded-* headers so req.ip and req.protocol are the client's, not the proxy's.
+app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({ origin: env.corsOrigin, credentials: true }));
 app.use(express.json());

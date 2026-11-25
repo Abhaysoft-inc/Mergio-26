@@ -1,0 +1,37 @@
+# The Mergio backend on a server, behind an existing reverse proxy (see README.md).
+#   docker compose up -d --build            build and (re)start the backend
+#   docker compose run --rm migrate         `prisma migrate status` against the database
+#   docker compose run --rm migrate migrate deploy    apply pending migrations
+name: mergio
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+      target: run
+    image: mergio-backend
+    container_name: mergio-backend
+    env_file: ${MERGIO_ENV_FILE:-/opt/mergio/backend.env}
+    restart: unless-stopped
+    # No host port: only the reverse proxy reaches it, on the shared network.
+    networks: [proxy]
+
+  # One-off Prisma commands. Uses the build stage, which has the Prisma CLI.
+  migrate:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+      target: build
+    image: mergio-backend-tools
+    profiles: [tools]
+    env_file: ${MERGIO_ENV_FILE:-/opt/mergio/backend.env}
+    working_dir: /app/packages/db
+    entrypoint: ["pnpm", "exec", "prisma"]
+    command: ["migrate", "status"]
+
+networks:
+  # The reverse proxy's Docker network, set in deploy/.env (PROXY_NETWORK=...).
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:?Set PROXY_NETWORK in deploy/.env to the reverse proxy's Docker network}
