@@ -63,6 +63,9 @@ function tcp(url: string): Kv {
     maxRetriesPerRequest: 2,
     connectTimeout: 5_000,
     enableOfflineQueue: true,
+    // A stalled connection or a long offline queue would otherwise hold a page until Redis
+    // answers; past this, the command fails and the read falls back to Postgres.
+    commandTimeout: 2_000,
   });
   redis.on("error", (error) => console.error("Redis:", error.message));
   return {

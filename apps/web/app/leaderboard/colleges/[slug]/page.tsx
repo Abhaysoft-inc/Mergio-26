@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LeaderboardScreen } from "@/components/leaderboard/leaderboard-screen";
 import { getSession } from "@/lib/dal";
-import { leaderboardSeason, parseFilters, resolveBoard } from "@/lib/leaderboard";
+import { leaderboardSeason, MAX_PAGE, parseFilters, resolveBoard } from "@/lib/leaderboard";
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -28,7 +28,7 @@ export default async function CollegeLeaderboardPage({ params, searchParams }: P
   if (!season) notFound();
   const resolved = await resolveBoard(season, `college:${slug}`);
   if (!resolved?.subject) notFound();
-  const page = Math.max(1, Number.parseInt(first(raw.page) ?? "1", 10) || 1);
+  const page = Math.min(MAX_PAGE, Math.max(1, Number.parseInt(first(raw.page) ?? "1", 10) || 1));
   const filters = { ...parseFilters((name) => first(raw[name])), college: null, state: null };
 
   return (

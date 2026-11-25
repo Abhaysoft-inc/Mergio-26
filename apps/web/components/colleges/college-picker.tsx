@@ -38,8 +38,9 @@ export function CollegePicker({
   const visible = searching ? options : [];
 
   useEffect(() => {
-    if (!searching) return;
+    // Bumping the id also discards a response still in flight for an earlier query.
     const id = ++request.current;
+    if (!searching) return;
     const timer = setTimeout(async () => {
       try {
         const response = await fetch(`/api/v1/colleges?q=${encodeURIComponent(query)}`);

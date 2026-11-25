@@ -1,4 +1,4 @@
-import { prisma, type LeaderboardSnapshotKind } from "@repo/db";
+import { prisma, type LeaderboardSnapshotKind, type Prisma } from "@repo/db";
 import { boardKey, boardPhase, type BoardRef } from "../../leaderboard";
 import { istWeekKey } from "../../time";
 import type { LeaderboardSeason } from "./cache";
@@ -96,23 +96,46 @@ export async function unfreezeLeaderboard(seasonId: string) {
   if (count === 0) throw new LeaderboardStateError("The leaderboard isn't frozen (or is finalized).");
 }
 
+/**
+ * For a transaction about to write to the season's ledger: takes a shared lock on the season row
+ * and says whether writing is allowed (not finalized). Finalizing takes the row exclusively, so a
+ * write either commits before the final snapshot is read, or waits and then sees it finalized.
+ */
+export async function ledgerOpen(tx: Prisma.TransactionClient, seasonId: string): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ finalizedAt: Date | null }[]>`
+    SELECT "finalizedAt" FROM "Season" WHERE id = ${seasonId} FOR SHARE
+  `;
+  return rows.length > 0 && rows[0]!.finalizedAt === null;
+}
+
 /** Locks the ledger and records the official ranks. Only after coding has ended. */
 export async function finalizeLeaderboard(seasonId: string, actorId: string, now = new Date()) {
-  const season = await prisma.season.findUniqueOrThrow({ where: { id: seasonId } });
-  if (season.finalizedAt) throw new LeaderboardStateError("The leaderboard is already finalized.");
-  if (!season.codingEndsAt || now < season.codingEndsAt) {
-    throw new LeaderboardStateError("Finalize after the contribution window has closed.");
-  }
-  const snapshotId = await takeSnapshot(seasonId, "FINAL", actorId, now);
-  const { count } = await prisma.season.updateMany({
-    where: { id: seasonId, finalizedAt: null },
-    data: { finalizedAt: now, finalizedById: actorId, finalSnapshotId: snapshotId },
-  });
-  if (count === 0) {
-    await prisma.leaderboardSnapshot.delete({ where: { id: snapshotId } });
-    throw new LeaderboardStateError("The leaderboard was finalized by someone else just now.");
-  }
-  return snapshotId;
+  return prisma.$transaction(
+    async (tx) => {
+      // Waits for ledger writes in flight (see ledgerOpen) and holds off new ones until commit.
+      const [season] = await tx.$queryRaw<{ finalizedAt: Date | null; codingEndsAt: Date | null }[]>`
+        SELECT "finalizedAt", "codingEndsAt" FROM "Season" WHERE id = ${seasonId} FOR UPDATE
+      `;
+      if (!season) throw new LeaderboardStateError("No such season.");
+      if (season.finalizedAt) throw new LeaderboardStateError("The leaderboard is already finalized.");
+      if (!season.codingEndsAt || now < season.codingEndsAt) {
+        throw new LeaderboardStateError("Finalize after the contribution window has closed.");
+      }
+      // Read on another connection: everything committed before the lock is in it, nothing after.
+      const snapshotId = await takeSnapshot(seasonId, "FINAL", actorId, now);
+      try {
+        await tx.season.update({
+          where: { id: seasonId },
+          data: { finalizedAt: now, finalizedById: actorId, finalSnapshotId: snapshotId },
+        });
+      } catch (error) {
+        await prisma.leaderboardSnapshot.delete({ where: { id: snapshotId } });
+        throw error;
+      }
+      return snapshotId;
+    },
+    { timeout: 300_000, maxWait: 10_000 },
+  );
 }
 
 /** Super Admins only (checked by the caller). The final snapshot is kept as a record. */
@@ -135,14 +158,23 @@ export async function seasonLocked(seasonId: string) {
  * live. Badges use this, so a rank badge can't reveal a live rank during the freeze.
  */
 export async function officialRankSql(season: LeaderboardSeason, userId: string, now = new Date()) {
+  return (await officialRanksSql(season, now, userId)).get(userId) ?? null;
+}
+
+/** Every official overall rank (or one user's), by user id. One query for a whole season run. */
+export async function officialRanksSql(
+  season: LeaderboardSeason,
+  now = new Date(),
+  userId?: string,
+): Promise<Map<string, number>> {
   const phase = boardPhase(season);
   if (phase.phase !== "live") {
-    const entry = await prisma.leaderboardSnapshotEntry.findUnique({
-      where: { snapshotId_board_entityId: { snapshotId: phase.snapshotId, board: "overall", entityId: userId } },
-      select: { rank: true },
+    const entries = await prisma.leaderboardSnapshotEntry.findMany({
+      where: { snapshotId: phase.snapshotId, board: "overall", ...(userId ? { entityId: userId } : {}) },
+      select: { entityId: true, rank: true },
     });
-    return entry?.rank ?? null;
+    return new Map(entries.map((entry) => [entry.entityId, entry.rank]));
   }
   const all = await boardRowsSql(season.id, { family: "overall" }, now);
-  return all.find((entry) => entry.id === userId)?.rank ?? null;
+  return new Map(all.map((entry) => [entry.id, entry.rank]));
 }

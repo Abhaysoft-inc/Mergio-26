@@ -3,6 +3,7 @@ import { prisma, Prisma } from "@repo/db";
 import { collegeSlug, normaliseCollegeName } from "@repo/scoring";
 import { enqueueJobs } from "@repo/scoring/server";
 import { activeSeason } from "./projects-server";
+import { likeText } from "./search";
 
 // The curated college list (F-08): AICTE and UGC institutions plus ones organizers add. A profile
 // keeps what the person typed; it points at a College when they picked one from the list, or when
@@ -21,8 +22,8 @@ export async function searchColleges(query: string, limit = 10): Promise<College
   return prisma.college.findMany({
     where: {
       OR: [
-        { name: { contains: text, mode: "insensitive" } },
-        ...(normalized ? [{ aliases: { some: { normalized: { contains: normalized } } } }] : []),
+        { name: { contains: likeText(text), mode: "insensitive" } },
+        ...(normalized ? [{ aliases: { some: { normalized: { contains: likeText(normalized) } } } }] : []),
       ],
     },
     orderBy: [{ name: "asc" }],
@@ -44,23 +45,40 @@ export async function resolveCollege(pickedId: string | null, typed: string) {
   }
   const alias = await prisma.collegeAlias.findUnique({
     where: { normalized: normaliseCollegeName(typed) },
-    select: { collegeId: true },
+    select: { collegeId: true, createdById: true, college: { select: { name: true } } },
   });
-  return alias
+  // Every college's own name is an alias, but the first college imported with a shared name
+  // ("Government Polytechnic") owns it. Typing such a name without picking from the list says
+  // nothing about which one, so leave it unmatched for an organizer instead of guessing. An
+  // organizer's own mapping (createdById set) is a decision, and always applies.
+  const ambiguous =
+    alias &&
+    !alias.createdById &&
+    normaliseCollegeName(alias.college.name) === normaliseCollegeName(typed) &&
+    (await prisma.college.count({ where: { name: { equals: alias.college.name, mode: "insensitive" } } })) > 1;
+  return alias && !ambiguous
     ? { collegeId: alias.collegeId, collegeMatch: "ALIAS" as const, college: typed }
     : { collegeId: null, collegeMatch: null, college: typed };
 }
 
-/** The live leaderboards re-read these users (their college changed). */
-export async function refreshLeaderboardUsers(userIds: string[]) {
+/**
+ * The live leaderboards re-read these users (their college changed). Pass the colleges they left
+ * too: the cache only knows a user's old college if that college's own board was built, so
+ * without this the old college's total on the colleges board could keep their points.
+ */
+export async function refreshLeaderboardUsers(userIds: string[], previousColleges: string[] = []) {
   const season = await activeSeason();
   if (!season || userIds.length === 0) return;
-  await enqueueJobs(
-    userIds.map((id) => ({
+  await enqueueJobs([
+    ...userIds.map((id) => ({
       kind: "LEADERBOARD_REFRESH" as const,
       payload: { seasonId: season.id, kind: "user" as const, id },
     })),
-  );
+    ...[...new Set(previousColleges)].map((id) => ({
+      kind: "LEADERBOARD_REFRESH" as const,
+      payload: { seasonId: season.id, kind: "college" as const, id },
+    })),
+  ]);
 }
 
 /** What people typed that matches no college yet, most common first. */
@@ -148,7 +166,8 @@ export async function updateCollege(id: string, input: { name: string; state: st
     data: { name, state, city: input.city?.trim() || null },
     select: { id: true, profiles: { select: { userId: true } } },
   });
-  await refreshLeaderboardUsers(college.profiles.map((profile) => profile.userId));
+  // Its own entry on the colleges board shows the name and state too.
+  await refreshLeaderboardUsers(college.profiles.map((profile) => profile.userId), [college.id]);
   return { ok: true as const };
 }
 

@@ -1,5 +1,6 @@
 import { prisma } from "@repo/db";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Icon } from "@/components/landing/icon";
 import { collegeStates } from "@/lib/colleges";
 import { formatDateTime } from "@/lib/format";
@@ -85,6 +86,8 @@ export async function LeaderboardScreen({
     gradYear: filters.graduationYear,
   };
   const pageHref = (n: number) => href(path, { ...fixedParams, ...filterParams, page: n });
+  // Past the last page (an old link, or a board that shrank): go to the last one.
+  if (result.page > result.pages) redirect(pageHref(result.pages));
 
   return (
     <div className="w-full">

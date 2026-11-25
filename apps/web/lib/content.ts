@@ -7,6 +7,7 @@ export const links = {
   githubSignIn: "/register",
   // Asks people to register as a maintainer first if they haven't.
   submitProject: "/projects/new",
+  leaderboard: "/leaderboard",
   mentor: "/register?role=mentor",
   maintainerGuide: "#",
   sponsor: "#",
@@ -289,7 +290,10 @@ export const footerFacts = [
 export const footerColumns = [
   {
     title: "Program",
-    links: navItems.map(({ id, label }) => ({ label, href: `#${id}` })),
+    links: [
+      ...navItems.map(({ id, label }) => ({ label, href: `#${id}` })),
+      { label: "Leaderboard", href: links.leaderboard },
+    ],
   },
   {
     title: "Get involved",

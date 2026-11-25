@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LeaderboardScreen } from "@/components/leaderboard/leaderboard-screen";
 import { getSession } from "@/lib/dal";
-import { leaderboardSeason, parseFilters, resolveBoard } from "@/lib/leaderboard";
+import { leaderboardSeason, MAX_PAGE, parseFilters, resolveBoard } from "@/lib/leaderboard";
 import { liveProject } from "@/lib/projects-server";
 
 export const metadata: Metadata = {
@@ -27,7 +27,7 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
   const raw = await searchParams;
   const view = first(raw.view) ?? "overall";
   const projectSlug = first(raw.project)?.trim() || null;
-  const page = Math.max(1, Number.parseInt(first(raw.page) ?? "1", 10) || 1);
+  const page = Math.min(MAX_PAGE, Math.max(1, Number.parseInt(first(raw.page) ?? "1", 10) || 1));
   const [season, session] = await Promise.all([leaderboardSeason(), getSession()]);
 
   if (!season) {

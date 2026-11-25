@@ -4,13 +4,15 @@ import { verifyBoard, type Verification } from "@repo/scoring/server";
 import { revalidatePath } from "next/cache";
 import { addCollege, mapCollegeAlias } from "@/lib/colleges";
 import { getSession } from "@/lib/dal";
-import { runLeaderboardAction, type LeaderboardAction } from "@/lib/leaderboard-admin";
+import { LEADERBOARD_ACTIONS, runLeaderboardAction, type LeaderboardAction } from "@/lib/leaderboard-admin";
 import { activeSeason } from "@/lib/projects-server";
 import { istWeekKey } from "@repo/scoring";
 
 export type AdminState = { error?: string; done?: string };
 
 export async function leaderboardAction(action: LeaderboardAction): Promise<AdminState> {
+  // A bound argument comes from the client like any other, so check it.
+  if (!LEADERBOARD_ACTIONS.includes(action)) return { error: "Unknown action." };
   const session = await getSession();
   if (!session) return { error: "Your session expired. Sign in with GitHub again." };
   const result = await runLeaderboardAction(session.user, action);

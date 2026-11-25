@@ -14,7 +14,7 @@ export async function GET(_request: Request, { params }: Context) {
   const { board: ref } = await params;
   const season = await leaderboardSeason();
   if (!season) return apiError(404, "There is no active season.");
-  const resolved = await resolveBoard(season, decodeURIComponent(ref));
+  const resolved = await resolveBoard(season, ref);
   if (!resolved) return apiError(404, "No such leaderboard.");
   const position = await myPosition(season, resolved, user.id);
   const phase = phaseOf(season);

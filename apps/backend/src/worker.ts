@@ -73,7 +73,8 @@ async function finishExpiredGraceWindows(now: Date) {
 async function refreshDeferredPoints(since: Date, now: Date) {
   const due = await prisma.$queryRaw<{ seasonId: string; userId: string }[]>`
     SELECT DISTINCT "seasonId", "userId" FROM "ScoreEvent"
-    WHERE "effectiveAt" > ${since} AND "effectiveAt" <= ${now} AND "createdAt" < "effectiveAt"
+    WHERE "seasonId" IN (SELECT id FROM "Season" WHERE "isActive")
+      AND "effectiveAt" > ${since} AND "effectiveAt" <= ${now} AND "createdAt" < "effectiveAt"
   `;
   await enqueueJobs(
     due.map((row) => ({

@@ -1,5 +1,6 @@
 import { prisma } from "@repo/db";
-import { standingOf } from "@repo/scoring/server";
+import { boardPhase, istWeekKey } from "@repo/scoring";
+import { rankIds } from "@repo/scoring/server";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -34,24 +35,37 @@ export default async function UserProfilePage({ params }: Props) {
   const [user, season] = await Promise.all([findUser(login), leaderboardSeason()]);
   if (!user || !season) notFound();
 
-  const [standing, badges, prs] = await Promise.all([
-    standingOf(season, user.id, new Date()),
+  // Rank and points come from the board's own source, so a frozen or final board shows the
+  // snapshot's numbers here too, not live ones that would undo the freeze.
+  const now = new Date();
+  const phase = boardPhase(season);
+  const week = istWeekKey(phase.phase === "live" ? now : phase.since);
+  const [overall, weekly, badges, prs] = await Promise.all([
+    rankIds(season, { family: "overall" }, [user.id], now),
+    rankIds(season, { family: "weekly", week }, [user.id], now),
     prisma.userBadge.findMany({
       where: { userId: user.id, seasonId: season.id },
       select: { badge: { select: { key: true, name: true, description: true, sortOrder: true } } },
     }),
     prisma.pullRequest.findMany({
-      where: { authorId: user.id, seasonId: season.id, scoreStatus: "SCORED" },
+      where: {
+        authorId: user.id,
+        seasonId: season.id,
+        scoreStatus: "SCORED",
+        ...(phase.phase === "live" ? {} : { scoredAt: { lte: phase.since } }),
+      },
       orderBy: { mergedAt: "desc" },
       take: 25,
       select: { id: true, title: true, url: true, number: true, level: true, points: true, repo: { select: { owner: true, name: true } } },
     }),
   ]);
   const college = user.profile?.collegeRecord;
+  const mine = overall.ranked[0];
+  const thisWeek = weekly.ranked[0];
   const stats = [
-    { label: "Rank", value: standing.rank ? `#${standing.rank}` : "—" },
-    { label: "Points", value: standing.points },
-    { label: "This week", value: `${standing.weeklyPoints}${standing.weeklyRank ? ` · #${standing.weeklyRank}` : ""}` },
+    { label: "Rank", value: mine ? `#${mine.rank}` : "—" },
+    { label: "Points", value: mine?.points ?? 0 },
+    { label: phase.phase === "live" ? "This week" : phase.phase === "final" ? "Final week" : "Frozen week", value: `${thisWeek?.points ?? 0}${thisWeek ? ` · #${thisWeek.rank}` : ""}` },
   ];
 
   return (
@@ -132,7 +146,13 @@ export default async function UserProfilePage({ params }: Props) {
                     {pr.level ? ` · ${LEVEL[pr.level]}` : ""}
                   </span>
                 </a>
-                <span className="font-mono text-sm tabular-nums">+{pr.points}</span>
+                {/* A PR's net points can change after a freeze; the board totals above can't. */}
+                {phase.phase === "live" && (
+                  <span className="font-mono text-sm tabular-nums">
+                    {pr.points >= 0 ? "+" : ""}
+                    {pr.points}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

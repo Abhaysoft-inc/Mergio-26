@@ -4,7 +4,9 @@ import { apiError, apiUser } from "@/lib/api";
 import {
   boardPage,
   leaderboardSeason,
+  MAX_PAGE,
   parseFilters,
+  parsePage,
   phaseOf,
   resolveBoard,
   rowJson,
@@ -21,11 +23,11 @@ export async function GET(request: NextRequest, { params }: Context) {
   const { board: ref } = await params;
   const season = await leaderboardSeason();
   if (!season) return apiError(404, "There is no active season.");
-  const resolved = await resolveBoard(season, decodeURIComponent(ref));
+  const resolved = await resolveBoard(season, ref);
   if (!resolved) return apiError(404, "No such leaderboard.");
   const search = request.nextUrl.searchParams;
-  const page = Number(search.get("page") ?? 1);
-  if (!Number.isInteger(page) || page < 1) return apiError(400, "page must be a positive integer");
+  const page = parsePage(search.get("page"));
+  if (page === null) return apiError(400, `page must be a whole number from 1 to ${MAX_PAGE}`);
   const filters = parseFilters((name) => search.get(name));
 
   const result = await boardPage(season, resolved, filters, page);

@@ -128,8 +128,13 @@ end
 return 1
 `;
 
-/** KEYS tmpZ, tmpIdx, z, idx, built; ARGV builtValue, ttl. Swaps a finished build in. */
+/**
+ * KEYS tmpZ, tmpIdx, z, idx, built, lock; ARGV builtValue, ttl, token. Swaps a finished build in,
+ * unless the build's lock expired and another build took over: then that one's rows win (it read
+ * Postgres later), and this returns 0.
+ */
 const SWAP = `
+if redis.call('GET', KEYS[6]) ~= ARGV[3] then return 0 end
 if redis.call('EXISTS', KEYS[1]) == 1 then redis.call('RENAME', KEYS[1], KEYS[3]) else redis.call('DEL', KEYS[3]) end
 if redis.call('EXISTS', KEYS[2]) == 1 then redis.call('RENAME', KEYS[2], KEYS[4]) else redis.call('DEL', KEYS[4]) end
 redis.call('SET', KEYS[5], ARGV[1])
@@ -139,6 +144,12 @@ if ttl > 0 then
   redis.call('EXPIRE', KEYS[4], ttl)
   redis.call('EXPIRE', KEYS[5], ttl)
 end
+return 1
+`;
+
+/** KEYS lock; ARGV token. Releases the lock only if it is still ours. */
+const UNLOCK = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('DEL', KEYS[1]) end
 return 1
 `;
 
@@ -202,18 +213,25 @@ export async function rebuildBoard(
   const keys = keysOf(seasonId, source, board);
   const token = randomUUID();
   if (!(await store.setNx(keys.lock, token, 60_000))) return false;
+  const tmp = `${keys.z}:tmp:${token}`;
+  const tmpIdx = `${keys.idx}:tmp:${token}`;
   try {
     // Changes from here on are marked dirty and re-read after the swap.
     await store.del([keys.dirty]);
     const rows = await sourceRows(seasonId, source, board);
-    const tmp = `${keys.z}:tmp:${token}`;
-    const tmpIdx = `${keys.idx}:tmp:${token}`;
     const members = rows.map((row) => [row.id, encodeMember(row)] as const);
-    for (const part of chunks(members)) {
+    for (const [index, part] of chunks(members).entries()) {
       await store.zaddZero(tmp, part.map(([, member]) => member));
       await store.hset(tmpIdx, Object.fromEntries(part));
+      // If this process dies half way, the temporary keys go away by themselves.
+      if (index === 0) await Promise.all([store.expire(tmp, 600), store.expire(tmpIdx, 600)]);
     }
-    await store.eval(SWAP, [tmp, tmpIdx, keys.z, keys.idx, keys.built], [new Date().toISOString(), keys.ttl]);
+    const swapped = await store.eval<number>(
+      SWAP,
+      [tmp, tmpIdx, keys.z, keys.idx, keys.built, keys.lock],
+      [new Date().toISOString(), keys.ttl, token],
+    );
+    if (Number(swapped) !== 1) return false;
 
     if (source.kind === "live" && board.family === "college") {
       for (const part of chunks(rows)) {
@@ -226,7 +244,9 @@ export async function rebuildBoard(
     }
     return true;
   } finally {
-    await store.del([keys.lock]);
+    // After a swap the tmp keys are gone already; after a failure they'd otherwise linger.
+    await store.del([tmp, tmpIdx]);
+    await store.eval(UNLOCK, [keys.lock], [token]);
   }
 }
 

@@ -77,6 +77,7 @@ export async function registerAction(
     select: { role: true },
   });
   const held = new Set(existing.map((registration) => registration.role));
+  const before = await prisma.profile.findUnique({ where: { userId }, select: { collegeId: true } });
   const newRoles = data.roles.filter((role) => !held.has(role));
 
   await prisma.$transaction([
@@ -117,7 +118,8 @@ export async function registerAction(
     await enqueueJobs([{ kind: "USER_RESCORE", payload: { userId } }]);
   }
   // College and graduation year show on the leaderboards.
-  await refreshLeaderboardUsers([userId]);
+  const left = before?.collegeId && before.collegeId !== college.collegeId ? [before.collegeId] : [];
+  await refreshLeaderboardUsers([userId], left);
   // Project admins may have invited this GitHub login as a mentor before they signed up.
   await linkMentorInvites(session.user);
 

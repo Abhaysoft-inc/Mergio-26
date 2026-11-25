@@ -8,7 +8,7 @@ import {
   resolveRules,
   type Evaluation,
 } from "@repo/scoring";
-import { enqueueJobs, projectStaffIds } from "@repo/scoring/server";
+import { enqueueJobs, ledgerOpen, projectStaffIds } from "@repo/scoring/server";
 import { awardBadges } from "./badges";
 import { scoreMentorPoints } from "./mentor-points";
 
@@ -177,6 +177,8 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
   await prisma.$transaction(async (tx) => {
     // One contributor's PRs are scored one at a time, so the daily cap can't be overrun.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`score:${authorId}`}))`;
+    // Re-checked under the season lock: it may have been finalized since the check above.
+    if (!(await ledgerOpen(tx, season.id))) return;
 
     const [existing, awards] = await Promise.all([
       tx.scoreEvent.findMany({

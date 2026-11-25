@@ -9,6 +9,7 @@ import {
   type LeaderboardSeason,
 } from "@repo/scoring/server";
 import { activeSeason } from "./projects-server";
+import { likeText } from "./search";
 
 // The leaderboards as pages and the API see them (F-08): which board a request means, search and
 // filters, "jump to me". Ranks always come from the official source (live, frozen or final), the
@@ -109,13 +110,27 @@ export function parseFilters(get: (name: string) => string | null | undefined): 
   };
 }
 
+/**
+ * Far past any real board (500,000 rows). Without a cap a page like 1e20 overflows Redis' ZRANGE
+ * offset, and every such request falls back to a full SQL ranking.
+ */
+export const MAX_PAGE = 10_000;
+
+/** A ?page= value: 1 when missing, null when it isn't a whole number from 1 to MAX_PAGE. */
+export function parsePage(raw: string | null | undefined): number | null {
+  if (raw == null || raw === "") return 1;
+  if (!/^\d{1,6}$/.test(raw)) return null;
+  const page = Number(raw);
+  return page >= 1 && page <= MAX_PAGE ? page : null;
+}
+
 const MAX_CANDIDATES = 25_000;
 
 /** Ids on this kind of board matching the filters, from Postgres. */
-async function candidateIds(view: BoardView, filters: Filters): Promise<string[]> {
+async function candidateIds(seasonId: string, view: BoardView, filters: Filters): Promise<string[]> {
   if (view === "colleges") {
     const where: Prisma.CollegeWhereInput = {
-      ...(filters.q ? { name: { contains: filters.q, mode: "insensitive" } } : {}),
+      ...(filters.q ? { name: { contains: likeText(filters.q), mode: "insensitive" } } : {}),
       ...(filters.state ? { state: filters.state } : {}),
       ...(filters.college ? { slug: filters.college } : {}),
     };
@@ -137,14 +152,19 @@ async function candidateIds(view: BoardView, filters: Filters): Promise<string[]
     ...(filters.q
       ? {
           OR: [
-            { name: { contains: filters.q, mode: "insensitive" } },
-            { githubLogin: { contains: filters.q.replace(/^@/, ""), mode: "insensitive" } },
+            { name: { contains: likeText(filters.q), mode: "insensitive" } },
+            { githubLogin: { contains: likeText(filters.q.replace(/^@/, "")), mode: "insensitive" } },
           ],
         }
       : {}),
     ...(Object.keys(profile).length ? { profile } : {}),
+    // Only people with points this season can be on the board, so the candidate cap below is
+    // spent on them and not on everyone who ever signed in.
+    ...(view === "mentors"
+      ? { mentorPoints: { some: { seasonId } } }
+      : { scoreEvents: { some: { seasonId } } }),
   };
-  const rows = await prisma.user.findMany({ where, select: { id: true }, take: MAX_CANDIDATES });
+  const rows = await prisma.user.findMany({ where, select: { id: true }, orderBy: { id: "asc" }, take: MAX_CANDIDATES });
   return rows.map((row) => row.id);
 }
 
@@ -178,7 +198,7 @@ export async function boardPage(
       servedFrom: result.servedFrom,
     };
   }
-  const ids = await candidateIds(resolved.view, filters);
+  const ids = await candidateIds(season.id, resolved.view, filters);
   const { total: boardTotal, ranked, servedFrom } = await rankIds(season, resolved.board, ids, now);
   const rows = await describeRows(season, resolved.board, ranked.slice(offset, offset + PAGE_SIZE), now);
   return {

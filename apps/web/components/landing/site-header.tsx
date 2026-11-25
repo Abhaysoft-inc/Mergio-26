@@ -58,6 +58,7 @@ export function SiteHeader() {
               {label}
             </a>
           ))}
+          <a href={links.leaderboard}>Leaderboard</a>
         </nav>
         <span className="sep" aria-hidden="true" />
         <ThemeToggle />
@@ -97,6 +98,9 @@ export function SiteHeader() {
             {label}
           </a>
         ))}
+        <a href={links.leaderboard} onClick={closeMenu}>
+          Leaderboard
+        </a>
         <a href="#maintainers" onClick={closeMenu}>
           Submit a project
         </a>

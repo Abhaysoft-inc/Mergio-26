@@ -6,7 +6,7 @@ import {
   resolveRules,
   reviewRuleKey,
 } from "@repo/scoring";
-import { enqueueJobs, projectStaffIds } from "@repo/scoring/server";
+import { enqueueJobs, ledgerOpen, projectStaffIds } from "@repo/scoring/server";
 
 // Applies mentor points (PRD §4.5) for one PR: its approving reviews, and the issues it closes.
 // Called after the PR's contributor score is updated, so its scoreStatus is current.
@@ -60,6 +60,8 @@ export async function scoreMentorPoints(pullRequestId: string) {
   await prisma.$transaction(async (tx) => {
     // Issue rules are shared by every PR closing the issue, so serialize per project.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`mentor:${project.id}`}))`;
+    // Re-checked under the season lock: it may have been finalized since the check above.
+    if (!(await ledgerOpen(tx, project.season.id))) return;
     const [staff, existing] = await Promise.all([
       projectStaffIds(project.id),
       tx.mentorPointEvent.findMany({
