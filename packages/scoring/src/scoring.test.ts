@@ -321,6 +321,73 @@ describe("daily cap", () => {
   });
 });
 
+describe("reversals", () => {
+  const plan = (existing: ExistingEntry[], labels: string[], now: Date, dailyUsed = new Map<string, number>()) =>
+    planLedger({
+      desired: awardsOf(evaluate({ labels })),
+      existing,
+      mergedAt: merged,
+      now,
+      dailyUsed,
+      dailyCap: 40,
+      reversalDescription: "taken back",
+    });
+
+  test("a reversal counts from the same moment as the award it cancels", () => {
+    const awardedAt = merged;
+    const existing = [{ ruleKey: "base", points: 25, effectiveAt: awardedAt }];
+    const later = new Date(merged.getTime() + 8 * 86_400_000); // a week on
+    const [reversal] = plan(existing, ["wos"], later);
+    assert.equal(reversal!.kind, "REVERSAL");
+    assert.equal(reversal!.points, -25);
+    assert.equal(reversal!.effectiveAt.getTime(), awardedAt.getTime());
+  });
+
+  test("a held award is reversed on the day it was held to, not before", () => {
+    const heldTo = istDayStart("2026-12-11");
+    const existing = [
+      { ruleKey: "base", points: 30, effectiveAt: merged },
+      { ruleKey: "base", points: 15, effectiveAt: heldTo },
+    ];
+    const reversals = plan(existing, ["wos"], hours(3));
+    // The held 15 are taken back first, effective when they would have counted.
+    assert.deepEqual(
+      reversals.map((entry) => [entry.points, entry.effectiveAt.getTime()]),
+      [
+        [-15, heldTo.getTime()],
+        [-30, merged.getTime()],
+      ],
+    );
+  });
+
+  test("a partial reversal only takes back the difference", () => {
+    const existing = [{ ruleKey: "base", points: 45, effectiveAt: merged }];
+    const reversals = plan(existing, ["wos", "level:intermediate"], hours(3));
+    assert.deepEqual(reversals.map((entry) => entry.points), [-20]);
+  });
+
+  test("reversed points free the day's cap room again", () => {
+    // 40 awarded on the merge day, then taken back: the next award fits on the same day.
+    const day = istDay(merged);
+    const awarded = [
+      { ruleKey: "base", points: 40, effectiveAt: merged },
+      { ruleKey: "base", points: -40, effectiveAt: merged },
+    ];
+    // dailyUsed is the net the caller computes: 0 for that day.
+    const again = plan(awarded, ["wos", "level:advanced"], hours(3), new Map([[day, 0]]));
+    assert.deepEqual(
+      again.map((entry) => [entry.points, istDay(entry.effectiveAt)]),
+      [[40, day], [5, "2026-12-11"]],
+    );
+  });
+
+  test("older entries without dates are reversed now", () => {
+    const [reversal] = plan([{ ruleKey: "base", points: 25 }], ["wos"], hours(3));
+    assert.equal(reversal!.points, -25);
+    assert.equal(reversal!.effectiveAt.getTime(), hours(3).getTime());
+  });
+});
+
 describe("time", () => {
   test("IST days and weeks", () => {
     assert.equal(istDay(new Date("2026-12-10T18:29:59Z")), "2026-12-10");

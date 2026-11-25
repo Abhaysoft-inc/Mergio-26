@@ -1,4 +1,4 @@
-import { prisma, type SyncJob } from "@repo/db";
+import { Prisma, prisma, type SyncJob } from "@repo/db";
 
 // Claiming and finishing SyncJob rows. Claims use FOR UPDATE SKIP LOCKED, so any number of
 // workers can share the queue, and never take a job whose key is already running elsewhere
@@ -38,17 +38,36 @@ export async function completeJob(id: string) {
  * already queued (that one refetches the same state). `countAttempt: false` is for rate limits.
  */
 async function requeue(job: SyncJob, runAt: Date, error: string, countAttempt: boolean) {
-  await prisma.$executeRaw`
-    UPDATE "SyncJob" SET
-      "status" = CASE WHEN EXISTS (
-        SELECT 1 FROM "SyncJob" q WHERE q."dedupeKey" = ${job.dedupeKey} AND q."status" = 'QUEUED'
-      ) THEN 'DONE'::"SyncJobStatus" ELSE 'QUEUED'::"SyncJobStatus" END,
-      "runAt" = ${runAt},
-      "lockedAt" = NULL,
-      "lastError" = ${error},
-      "attempts" = "attempts" - ${countAttempt ? 0 : 1}
-    WHERE "id" = ${job.id}
-  `;
+  try {
+    await prisma.$executeRaw`
+      UPDATE "SyncJob" SET
+        "status" = CASE WHEN EXISTS (
+          SELECT 1 FROM "SyncJob" q WHERE q."dedupeKey" = ${job.dedupeKey} AND q."status" = 'QUEUED'
+        ) THEN 'DONE'::"SyncJobStatus" ELSE 'QUEUED'::"SyncJobStatus" END,
+        "runAt" = ${runAt},
+        "lockedAt" = NULL,
+        "lastError" = ${error},
+        "attempts" = "attempts" - ${countAttempt ? 0 : 1}
+      WHERE "id" = ${job.id}
+    `;
+  } catch (cause) {
+    if (!isQueuedDuplicate(cause)) throw cause;
+    // A webhook queued a job for the same key between the EXISTS check and this update (the
+    // partial unique index on queued dedupe keys caught it). That newer job refetches the same
+    // state, so this one is done.
+    await prisma.syncJob.update({
+      where: { id: job.id },
+      data: { status: "DONE", finishedAt: new Date(), lockedAt: null, lastError: error },
+    });
+  }
+}
+
+/** Whether an error is a unique violation of the "one QUEUED job per dedupe key" index. */
+function isQueuedDuplicate(error: unknown) {
+  // Raw queries come back as P2010 whatever Postgres said, so the index name is what identifies
+  // it; P2002 covers the same violation from a model query.
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return true;
+  return error instanceof Error && error.message.includes("SyncJob_queued_dedupeKey_key");
 }
 
 /** Retries with exponential backoff (1, 2, 4 ... minutes), then gives up as FAILED. */

@@ -70,7 +70,7 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
   const authorId = pr.authorId ?? (await userForGithubId(pr.authorGithubId));
   const mergedAt = pr.mergedAt;
 
-  const [staff, registration, author, revert, beginnerCount, qualityThisWeek] = await Promise.all([
+  const [staff, registration, author, revert] = await Promise.all([
     projectStaffIds(project.id),
     authorId
       ? prisma.registration.findFirst({
@@ -86,110 +86,130 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
       orderBy: { mergedAt: "asc" },
       select: { mergedAt: true },
     }),
-    authorId && mergedAt
-      ? prisma.pullRequest.count({
-          where: {
-            id: { not: pr.id },
-            authorId,
-            seasonId: season.id,
-            repo: { projectId: project.id },
-            scoreStatus: "SCORED",
-            level: "BEGINNER",
-            mergedAt: { lt: mergedAt },
-          },
-        })
-      : 0,
-    authorId && mergedAt
-      ? prisma.scoreEvent
-          .groupBy({
-            by: ["pullRequestId"],
-            where: {
-              userId: authorId,
-              seasonId: season.id,
-              ruleKey: "bonus:quality",
-              pullRequestId: { not: pr.id },
-              pullRequest: {
-                repo: { projectId: project.id },
-                mergedAt: {
-                  gte: istWeekStart(mergedAt),
-                  lt: new Date(istWeekStart(mergedAt).getTime() + 7 * DAY_MS),
-                },
-              },
-            },
-            _sum: { points: true },
-          })
-          .then((groups) => groups.filter((group) => (group._sum.points ?? 0) > 0).length)
-      : 0,
   ]);
 
-  const evaluation = evaluatePullRequest(
-    {
-      state: pr.state,
-      mergedAt,
-      labels: pr.labels,
-      linkedIssueLabels: pr.linkedIssueLabels,
-      baseRef: pr.baseRef,
-      defaultBranch: repo.defaultBranch,
-      changedLines: pr.changedLines,
-      selfMerged: pr.mergedByGithubId !== null && pr.mergedByGithubId === pr.authorGithubId,
-      revertedAt: revert?.mergedAt ?? null,
-    },
-    {
-      registered: Boolean(registration),
-      // The project admin and the project's active mentors can't score on it.
-      projectStaff: authorId !== null && staff.has(authorId),
-      scoringSuspendedAt: author?.scoringSuspendedAt ?? null,
-    },
-    {
-      repoTracked:
-        repo.approval === "APPROVED" &&
-        project.status === "APPROVED" &&
-        (!repo.removedAt || (mergedAt !== null && repo.removedAt > mergedAt)),
-      codingStartsAt: season.codingStartsAt,
-      codingEndsAt: season.codingEndsAt,
-      beginnerPrsScoredInProject: beginnerCount,
-      qualityBonusesInProjectThisWeek: qualityThisWeek,
-      now,
-    },
-    rules,
-  );
+  /**
+   * The per-project caps count this author's other scored PRs. They are read by the caller: inside
+   * the author's lock for anyone with an account, so two of their PRs scored at once can't both
+   * pass a cap.
+   */
+  const capCounts = async (db: Pick<typeof prisma, "pullRequest" | "scoreEvent">) => {
+    if (!authorId || !mergedAt) return { beginnerCount: 0, qualityThisWeek: 0 };
+    const [beginnerCount, qualityThisWeek] = await Promise.all([
+      db.pullRequest.count({
+        where: {
+          id: { not: pr.id },
+          authorId,
+          seasonId: season.id,
+          repo: { projectId: project.id },
+          scoreStatus: "SCORED",
+          level: "BEGINNER",
+          mergedAt: { lt: mergedAt },
+        },
+      }),
+      db.scoreEvent
+        .groupBy({
+          by: ["pullRequestId"],
+          where: {
+            userId: authorId,
+            seasonId: season.id,
+            ruleKey: "bonus:quality",
+            pullRequestId: { not: pr.id },
+            pullRequest: {
+              repo: { projectId: project.id },
+              mergedAt: {
+                gte: istWeekStart(mergedAt),
+                lt: new Date(istWeekStart(mergedAt).getTime() + 7 * DAY_MS),
+              },
+            },
+          },
+          _sum: { points: true },
+        })
+        .then((groups) => groups.filter((group) => (group._sum.points ?? 0) > 0).length),
+    ]);
+    return { beginnerCount, qualityThisWeek };
+  };
 
-  const fields = statusFields(evaluation);
-  const desired = evaluation.status === "SCORED" ? evaluation.awards : [];
-  const reason =
-    evaluation.status === "NOT_ELIGIBLE" || evaluation.status === "INVALIDATED"
-      ? evaluation.reason
-      : null;
+  const evaluate = (counts: { beginnerCount: number; qualityThisWeek: number }) =>
+    evaluatePullRequest(
+      {
+        state: pr.state,
+        mergedAt,
+        labels: pr.labels,
+        linkedIssueLabels: pr.linkedIssueLabels,
+        baseRef: pr.baseRef,
+        defaultBranch: repo.defaultBranch,
+        changedLines: pr.changedLines,
+        selfMerged: pr.mergedByGithubId !== null && pr.mergedByGithubId === pr.authorGithubId,
+        revertedAt: revert?.mergedAt ?? null,
+      },
+      {
+        registered: Boolean(registration),
+        // The project admin and the project's active mentors can't score on it.
+        projectStaff: authorId !== null && staff.has(authorId),
+        scoringSuspendedAt: author?.scoringSuspendedAt ?? null,
+      },
+      {
+        repoTracked:
+          repo.approval === "APPROVED" &&
+          project.status === "APPROVED" &&
+          (!repo.removedAt || (mergedAt !== null && repo.removedAt > mergedAt)),
+        codingStartsAt: season.codingStartsAt,
+        codingEndsAt: season.codingEndsAt,
+        beginnerPrsScoredInProject: counts.beginnerCount,
+        qualityBonusesInProjectThisWeek: counts.qualityThisWeek,
+        now,
+      },
+      rules,
+    );
+  const reasonOf = (evaluation: Evaluation) =>
+    evaluation.status === "NOT_ELIGIBLE" || evaluation.status === "INVALIDATED" ? evaluation.reason : null;
 
   if (!authorId) {
     // No account, so nothing can be on the ledger; just record the outcome.
+    const evaluation = evaluate({ beginnerCount: 0, qualityThisWeek: 0 });
     await prisma.pullRequest.update({
       where: { id: pr.id },
-      data: { scoreStatus: evaluation.status, ...fields, points: 0, scoredAt: now },
+      data: { scoreStatus: evaluation.status, ...statusFields(evaluation), points: 0, scoredAt: now },
     });
     await scoreMentorPoints(pr.id);
     return;
   }
 
-  await prisma.$transaction(async (tx) => {
+  const evaluation = await prisma.$transaction(async (tx) => {
     // One contributor's PRs are scored one at a time, so the daily cap can't be overrun.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`score:${authorId}`}))`;
+
+    // Everything the outcome depends on is read under the lock, the per-project caps included.
+    const evaluation = evaluate(await capCounts(tx));
+    const fields = statusFields(evaluation);
+    const desired = evaluation.status === "SCORED" ? evaluation.awards : [];
+    const reason = reasonOf(evaluation);
 
     const [existing, awards] = await Promise.all([
       tx.scoreEvent.findMany({
         where: { pullRequestId: pr.id },
-        select: { ruleKey: true, points: true },
+        select: { ruleKey: true, points: true, effectiveAt: true },
       }),
+      // What the daily cap counts: the engine's own awards net of what was taken back. Organizer
+      // adjustments and dispute corrections are outside the cap.
       tx.scoreEvent.findMany({
-        where: { userId: authorId, seasonId: season.id, kind: "AWARD" },
+        where: {
+          userId: authorId,
+          seasonId: season.id,
+          kind: { in: ["AWARD", "REVERSAL"] },
+          OR: [{ ruleKey: "base" }, { ruleKey: { startsWith: "bonus:" } }],
+        },
         select: { points: true, effectiveAt: true },
       }),
     ]);
     const dailyUsed = new Map<string, number>();
-    for (const award of awards) {
-      const day = istDay(award.effectiveAt);
-      dailyUsed.set(day, (dailyUsed.get(day) ?? 0) + award.points);
+    for (const entry of awards) {
+      const day = istDay(entry.effectiveAt);
+      dailyUsed.set(day, (dailyUsed.get(day) ?? 0) + entry.points);
     }
+    // Reversals written before they were dated to the day they cancel can leave a day below zero.
+    for (const [day, used] of dailyUsed) if (used < 0) dailyUsed.set(day, 0);
 
     const plan = planLedger({
       desired,
@@ -243,6 +263,7 @@ export async function scorePullRequest(pullRequestId: string, now = new Date()) 
         });
       }
     }
+    return evaluation;
   });
 
   await scoreMentorPoints(pr.id);
