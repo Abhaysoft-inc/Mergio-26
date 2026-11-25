@@ -40,7 +40,7 @@ export async function openDispute(userId: string, input: unknown): Promise<Resul
   }
 
   const rejected = await prisma.dispute.count({ where: { userId, status: "REJECTED" } });
-  if (rejected > REJECTED_BEFORE_LIMIT) {
+  if (rejected >= REJECTED_BEFORE_LIMIT) {
     const recent = await prisma.dispute.count({
       where: { userId, createdAt: { gt: new Date(Date.now() - DAY_MS) } },
     });

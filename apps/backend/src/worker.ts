@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { prisma } from "@repo/db";
 import { autoFreezeDue, istDay } from "@repo/scoring";
 import {
@@ -43,14 +44,21 @@ async function workLoop(shouldStop: () => boolean) {
       await runJob(job);
       await completeJob(job.id);
     } catch (error) {
-      if (error instanceof RateLimitError) {
-        await postponeJob(job, error.resetAt, error.message);
-      } else if (error instanceof NotConfiguredError) {
-        // Keep the job until the app is configured instead of burning its attempts.
-        await postponeJob(job, new Date(Date.now() + HOUR_MS), error.message);
-      } else {
-        console.error(`Job ${job.kind} ${job.dedupeKey} failed (attempt ${job.attempts})`, error);
-        await failJob(job, error);
+      try {
+        if (error instanceof RateLimitError) {
+          await postponeJob(job, error.resetAt, error.message);
+        } else if (error instanceof NotConfiguredError) {
+          // Keep the job until the app is configured instead of burning its attempts.
+          await postponeJob(job, new Date(Date.now() + HOUR_MS), error.message);
+        } else {
+          console.error(`Job ${job.kind} ${job.dedupeKey} failed (attempt ${job.attempts})`, error);
+          await failJob(job, error);
+        }
+      } catch (bookkeeping) {
+        // A throw here would end this loop, and with it (unhandled rejection) the whole process.
+        // The job stays RUNNING and releaseStaleJobs() queues it again.
+        console.error(`Couldn't record the outcome of job ${job.kind} ${job.dedupeKey}`, bookkeeping);
+        await sleep(5_000);
       }
     }
   }
@@ -104,6 +112,24 @@ async function verifyLeaderboards(now: Date) {
   }
 }
 
+/**
+ * Claims today's nightly run for this process: true for the first caller of an IST day, false for
+ * any other (another worker, or this one after a restart). The claim is a row in `Verification`,
+ * which is a general key/value table with an expiry; the advisory lock makes check-and-insert
+ * atomic across processes.
+ */
+async function claimNightly(now: Date) {
+  const identifier = `mergio:nightly:${istDay(now)}`;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('mergio:nightly'))`;
+    if (await tx.verification.findFirst({ where: { identifier }, select: { id: true } })) return false;
+    await tx.verification.create({
+      data: { id: randomUUID(), identifier, value: "claimed", expiresAt: new Date(now.getTime() + 36 * HOUR_MS) },
+    });
+    return true;
+  });
+}
+
 async function nightly(now: Date) {
   const repos = await prisma.projectRepo.findMany({
     where: {
@@ -139,6 +165,9 @@ async function nightly(now: Date) {
   await prisma.webhookDelivery.deleteMany({
     where: { receivedAt: { lt: new Date(now.getTime() - 30 * 24 * HOUR_MS) } },
   });
+  await prisma.verification.deleteMany({
+    where: { identifier: { startsWith: "mergio:nightly:" }, expiresAt: { lt: now } },
+  });
   console.log(`Nightly reconciliation queued for ${repos.length} repos`);
 }
 
@@ -173,7 +202,8 @@ export function startWorker() {
       const today = istDay(now);
       if (lastNightly !== today && istHour(now) >= NIGHTLY_IST_HOUR && githubAppConfigured()) {
         lastNightly = today;
-        await nightly(now);
+        // Only one process runs it, once a day, however often workers restart.
+        if (await claimNightly(now)) await nightly(now);
       }
     } catch (error) {
       console.error("Worker tick failed", error);

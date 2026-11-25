@@ -147,7 +147,7 @@ function revertedNumber(body: string, repo: RepoRow) {
 }
 
 export async function syncPullRequest(githubRepoId: bigint, number: number) {
-  let repo = await findRepo(githubRepoId);
+  let repo = await findRepo(githubRepoId, number);
   if (!repo) return;
   const token = await tokenFor(repo);
   if (!token) return;
@@ -165,8 +165,13 @@ export async function syncPullRequest(githubRepoId: bigint, number: number) {
   const pr = data?.repository?.pullRequest;
   if (!data?.repository || !pr) return;
 
-  // Bots and deleted ("ghost") accounts never score, so they aren't stored.
-  if (!pr.author || pr.author.__typename !== "User" || !pr.author.databaseId) return;
+  // Bots and deleted ("ghost") accounts are stored too, so a revert PR they opened still takes
+  // the reverted PR's points back. They have no Mergio account, so they never score: the PR is
+  // recorded as not registered. A ghost has no id, so it is stored under 0, which no account has.
+  const author = {
+    githubId: BigInt(pr.author?.databaseId ?? 0),
+    login: pr.author?.login ?? "ghost",
+  };
 
   const defaultBranch = data.repository.defaultBranchRef?.name ?? null;
   if (defaultBranch && defaultBranch !== repo.defaultBranch) {
@@ -185,8 +190,8 @@ export async function syncPullRequest(githubRepoId: bigint, number: number) {
     githubId: BigInt(pr.databaseId),
     title: pr.title,
     url: pr.url,
-    authorGithubId: BigInt(pr.author.databaseId),
-    authorLogin: pr.author.login,
+    authorGithubId: author.githubId,
+    authorLogin: author.login,
     state: pr.state,
     isDraft: pr.isDraft,
     baseRef: pr.baseRefName,

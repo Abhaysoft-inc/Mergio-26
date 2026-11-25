@@ -6,7 +6,11 @@ import { addDays, istDay, istDayStart } from "./time";
 // (PRD §4.3): a change in worth is a new entry for the difference, never an edit. Running the
 // plan again after it was written gives no entries, which makes scoring idempotent.
 
-export type ExistingEntry = { ruleKey: string; points: number };
+/**
+ * `effectiveAt` is needed to take points back on the days they counted. Without it a reversal
+ * counts from `now`.
+ */
+export type ExistingEntry = { ruleKey: string; points: number; effectiveAt?: Date };
 
 export type PlannedEntry = {
   ruleKey: string;
@@ -24,7 +28,10 @@ export type LedgerPlanInput = {
   existing: ExistingEntry[];
   mergedAt: Date;
   now: Date;
-  /** Points already counted per IST day ("YYYY-MM-DD") for this contributor, from all PRs. */
+  /**
+   * Points already counted per IST day ("YYYY-MM-DD") for this contributor, from all PRs: awards
+   * minus what was taken back on that day, so points that were reversed free up their cap room.
+   */
   dailyUsed: ReadonlyMap<string, number>;
   /** Points per contributor per IST day; 0 turns the cap off. */
   dailyCap: number;
@@ -60,6 +67,42 @@ export function allocateDaily(
 }
 
 /**
+ * Splits a reversal of `points` (positive) over the days the rule's awards counted on, latest day
+ * first (those are the ones held back by the cap, so the most recent points go first). Each part
+ * counts from the same moment as the award it cancels, so the net is right on every day: a held
+ * award that is reverted never shows as a loss before it would have counted, and a PR from last
+ * week doesn't cost this week's points. Anything left over (older data without dates) counts now.
+ */
+function allocateReversal(
+  points: number,
+  entries: ExistingEntry[],
+  now: Date,
+): { points: number; effectiveAt: Date }[] {
+  const days = new Map<string, { net: number; effectiveAt: Date }>();
+  for (const entry of entries) {
+    if (!entry.effectiveAt) continue;
+    const day = istDay(entry.effectiveAt);
+    const bucket = days.get(day) ?? { net: 0, effectiveAt: entry.effectiveAt };
+    bucket.net += entry.points;
+    // The reversal must not count before the latest award it cancels on that day.
+    if (entry.points > 0 && entry.effectiveAt > bucket.effectiveAt) bucket.effectiveAt = entry.effectiveAt;
+    days.set(day, bucket);
+  }
+  const parts: { points: number; effectiveAt: Date }[] = [];
+  let remaining = points;
+  for (const day of [...days.keys()].sort().reverse()) {
+    if (remaining <= 0) break;
+    const bucket = days.get(day)!;
+    if (bucket.net <= 0) continue;
+    const take = Math.min(bucket.net, remaining);
+    parts.push({ points: take, effectiveAt: bucket.effectiveAt });
+    remaining -= take;
+  }
+  if (remaining > 0) parts.push({ points: remaining, effectiveAt: now });
+  return parts;
+}
+
+/**
  * Rule keys the engine owns: the level points and the bonuses. Other entries on a PR (organizer
  * adjustments, dispute corrections) are never touched by rescoring.
  */
@@ -67,9 +110,11 @@ export const isRuleKey = (ruleKey: string) => ruleKey === "base" || ruleKey.star
 
 export function planLedger(input: LedgerPlanInput): PlannedEntry[] {
   const current = new Map<string, number>();
+  const byRule = new Map<string, ExistingEntry[]>();
   for (const entry of input.existing) {
     if (!isRuleKey(entry.ruleKey)) continue;
     current.set(entry.ruleKey, (current.get(entry.ruleKey) ?? 0) + entry.points);
+    byRule.set(entry.ruleKey, [...(byRule.get(entry.ruleKey) ?? []), entry]);
   }
   const desired = new Map(input.desired.map((award) => [award.ruleKey, award]));
   const ruleKeys = [...new Set([...desired.keys(), ...current.keys()])].sort(
@@ -96,13 +141,18 @@ export function planLedger(input: LedgerPlanInput): PlannedEntry[] {
         });
       }
     } else if (delta < 0) {
-      entries.push({
-        ruleKey,
-        kind: "REVERSAL",
-        points: delta,
-        description: input.reversalDescription,
-        effectiveAt: input.now,
-      });
+      // Entries added by this plan count too, so a rule reversed twice in one run can't overshoot.
+      for (const part of allocateReversal(-delta, byRule.get(ruleKey) ?? [], input.now)) {
+        const day = istDay(part.effectiveAt);
+        used.set(day, (used.get(day) ?? 0) - part.points);
+        entries.push({
+          ruleKey,
+          kind: "REVERSAL",
+          points: -part.points,
+          description: input.reversalDescription,
+          effectiveAt: part.effectiveAt,
+        });
+      }
     }
   }
   return entries;

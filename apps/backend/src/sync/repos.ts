@@ -11,13 +11,26 @@ export const trackedRepoInclude = {
 /**
  * The repo row for a GitHub repo in the active season: accepted, not removed rows first. Null
  * when no project of the active season lists the repo (then its events are ignored).
+ *
+ * Two projects can list the same GitHub repo. A PR is stored under one row and stays there: pass
+ * `prNumber` when syncing a PR and the row that already holds it wins, so a change in which row
+ * is "best" (the first project removes the repo, the second is approved) can't store the PR a
+ * second time under the other row and count its points twice.
  */
-export async function findRepo(githubRepoId: bigint) {
+export async function findRepo(githubRepoId: bigint, prNumber?: number) {
   const rows = await prisma.projectRepo.findMany({
     where: { githubRepoId, project: { season: { isActive: true } } },
     include: trackedRepoInclude,
     orderBy: { createdAt: "asc" },
   });
+  if (rows.length > 1 && prNumber !== undefined) {
+    const holder = await prisma.pullRequest.findFirst({
+      where: { repoId: { in: rows.map((row) => row.id) }, number: prNumber },
+      select: { repoId: true },
+    });
+    const row = rows.find((candidate) => candidate.id === holder?.repoId);
+    if (row) return row;
+  }
   const score = (row: (typeof rows)[number]) =>
     (row.approval === "APPROVED" ? 2 : 0) + (row.removedAt ? 0 : 1);
   return rows.sort((a, b) => score(b) - score(a))[0] ?? null;
