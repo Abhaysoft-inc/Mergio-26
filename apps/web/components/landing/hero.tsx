@@ -1,4 +1,4 @@
-import { heroHighlights, links } from "@/lib/content";
+import { accountLink, heroHighlights, type Viewer } from "@/lib/content";
 import { DayClouds } from "./art/day-clouds";
 import { HeroTrees } from "./art/hero-trees";
 import { Horizon } from "./art/horizon";
@@ -9,7 +9,8 @@ import { Icon } from "./icon";
 import { HeroSnow } from "./snow";
 import { GdgLogo } from "./gdg-logo";
 
-export function Hero() {
+export function Hero({ viewer }: { viewer: Viewer }) {
+  const account = accountLink(viewer);
   return (
     <section className="hero">
       <div className="aurora" aria-hidden="true" />
@@ -37,9 +38,9 @@ export function Hero() {
           learn, and climb the leaderboard with every merged pull request.
         </p>
         <div className="hero-cta">
-          <a className="btn btn-primary" href={links.register}>
-            <Icon name="github" size={18} />
-            Register with GitHub
+          <a className="btn btn-primary" href={account.href}>
+            <Icon name={account.icon} size={18} />
+            {account.long}
           </a>
           <a className="btn btn-ghost" href="#how">
             How it works

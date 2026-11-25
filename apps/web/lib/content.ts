@@ -4,7 +4,6 @@ import type { IconName } from "@/components/landing/icon";
 
 export const links = {
   register: "/register",
-  githubSignIn: "/register",
   // Asks people to register as a maintainer first if they haven't.
   submitProject: "/projects/new",
   leaderboard: "/leaderboard",
@@ -17,6 +16,26 @@ export const links = {
   instagram: "#",
   linkedin: "#",
 };
+
+/** Who is looking at the landing page. Set by the page from the session (getViewer in lib/dal.ts). */
+export type Viewer = "signed-out" | "unregistered" | "registered";
+
+/**
+ * Where the landing page's "join" buttons lead. Registered people go to their dashboard
+ * instead of being asked to register again; people who signed in but never finished the form
+ * are sent back to it.
+ */
+export function accountLink(viewer: Viewer) {
+  switch (viewer) {
+    case "registered":
+      return { href: "/dashboard", label: "Dashboard", long: "Go to your dashboard", icon: "chart" as const };
+    case "unregistered":
+      // Short label: it has to fit the header pill on a 360px phone.
+      return { href: links.register, label: "Finish sign-up", long: "Finish your registration", icon: "github" as const };
+    case "signed-out":
+      return { href: links.register, label: "Register", long: "Register with GitHub", icon: "github" as const };
+  }
+}
 
 export const navItems = [
   { id: "about", label: "About" },
@@ -52,6 +71,8 @@ export const about = {
       cta: "Register",
       href: links.register,
       icon: "pr" as const,
+      // Follows accountLink(): becomes "Dashboard" once registered.
+      account: true,
     },
     {
       who: "Maintainers",
@@ -298,7 +319,8 @@ export const footerColumns = [
   {
     title: "Get involved",
     links: [
-      { label: "Register", href: links.register },
+      // Replaced by accountLink() in the footer.
+      { label: "Register", href: links.register, account: true },
       { label: "Submit a project", href: links.submitProject },
       { label: "Become a mentor", href: links.mentor },
       { label: "Become a sponsor", href: links.sponsor },

@@ -110,7 +110,12 @@ header.scrolled .pnav { background: rgba(16, 19, 26, .86); box-shadow: 0 14px 44
 .nav-links a { font-size: 14px; font-weight: 500; color: var(--muted); padding: 8px 18px; border-radius: 999px; transition: color .15s, background .15s; }
 .nav-links a:hover { color: var(--text); background: rgba(255, 255, 255, .05); }
 .nav-links a.active { color: var(--text); background: rgba(255, 255, 255, .08); }
-.nav-cta { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 20px; border-radius: 999px; background: #FFFFFF; color: #0B0D12; font-weight: 600; font-size: 14px; margin-left: 4px; }
+.nav-cta { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 20px; border-radius: 999px; background: #FFFFFF; color: #0B0D12; font-weight: 600; font-size: 14px; margin-left: 4px; white-space: nowrap; }
+/* Small phones: the pill holds the brand, theme toggle, this button and the menu button. */
+@media (max-width: 420px) {
+  .nav-cta { padding: 0 14px; }
+  .nav-cta svg { display: none; }
+}
 .nav-cta:hover { background: #E3E8F0; }
 .menu-btn { display: none; width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .06); color: var(--text); cursor: pointer; align-items: center; justify-content: center; }
 .mobile-menu { pointer-events: auto; display: none; margin-top: 10px; width: min(360px, 100%); padding: 8px; border: 1px solid var(--border-strong); border-radius: 20px; background: rgba(16, 19, 26, .96); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
