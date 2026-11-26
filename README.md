@@ -80,7 +80,7 @@ Registration uses [Better Auth](https://www.better-auth.com) with GitHub as the 
 2. Set **Homepage URL** to `https://mergio.in`. Under **Redirect URIs** add `http://localhost:3001/api/auth/callback/github` and `https://mergio.in/api/auth/callback/github`. Leave wildcard matching, device flow and token expiry off.
 3. Copy the **Client ID** into `GITHUB_CLIENT_ID`. Generate a **Client secret** and copy it into `GITHUB_CLIENT_SECRET`.
 4. Generate `BETTER_AUTH_SECRET` with `openssl rand -base64 32`, and set `BETTER_AUTH_URL="http://localhost:3001"`.
-5. Optional: list GitHub user IDs (numbers, comma separated) in `SUPER_ADMIN_GITHUB_IDS` to make those people super admins the next time they sign in. Find an ID at `https://api.github.com/users/<username>`. IDs are used because usernames can change: a username freed by a rename can be claimed by someone else.
+5. Optional: list GitHub usernames in `ADMIN_GITHUB_LOGINS` (comma separated) to make those people super admins the next time they sign in.
 
 The same app serves dev and production because it has both redirect URIs. Each environment sets its own `BETTER_AUTH_URL` (`http://localhost:3001` locally, `https://mergio.in` in production), and Better Auth builds the redirect URI from it. Both environments share one client secret, so give teammates a separate dev app once more than one person runs the project locally. In production, also set `AUTH_COOKIE_DOMAIN=".mergio.in"` so the session cookie is shared with `admin.mergio.in`.
 
@@ -107,7 +107,7 @@ The roles from the PRD (section 2), as computed by `rolesOf()` in `apps/web/lib/
 | Organizer | `User.staffRole = ORGANIZER`, or a super admin |
 | Super admin | `User.staffRole = SUPER_ADMIN` |
 
-Super admins come from `SUPER_ADMIN_GITHUB_IDS` and can make other people organizers or super admins through the API below.
+Super admins come from `ADMIN_GITHUB_LOGINS` and can make other people organizers or super admins through the API below.
 
 ### Bans
 

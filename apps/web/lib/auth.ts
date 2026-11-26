@@ -5,14 +5,13 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { APIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 
-// GitHub user IDs (numeric, they never change) that become super admins on sign-in. IDs, not
-// logins: a login freed by a rename can be claimed by anyone. Find an ID at
-// https://api.github.com/users/<login>. This only ever promotes: removing an ID here does not
-// demote someone, so change staffRole in the database (or through the admin API) for that.
-const superAdminIds = new Set(
-  (process.env.SUPER_ADMIN_GITHUB_IDS ?? "")
+// GitHub usernames (case-insensitive) that become super admins on sign-in. This only ever
+// promotes: removing a name here does not demote someone, so change staffRole in the database
+// (or through the admin API) for that.
+const adminLogins = new Set(
+  (process.env.ADMIN_GITHUB_LOGINS ?? "")
     .split(",")
-    .map((id) => id.trim())
+    .map((login) => login.trim().toLowerCase())
     .filter(Boolean),
 );
 
@@ -54,12 +53,12 @@ async function syncGithubIdentity(
     });
   }
 
-  const promote = superAdminIds.has(account.accountId);
-  if (!pending && !promote) return;
+  if (!pending) return;
+  const promote = adminLogins.has(pending.login.toLowerCase());
   await prisma.user.update({
     where: { id: account.userId },
     data: {
-      ...(pending ? { githubLogin: pending.login } : {}),
+      githubLogin: pending.login,
       ...(promote ? { staffRole: "SUPER_ADMIN" } : {}),
     },
   });
