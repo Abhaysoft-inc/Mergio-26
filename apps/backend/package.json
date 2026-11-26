@@ -15,6 +15,7 @@
     "season:window": "tsx --env-file-if-exists=.env src/scripts/season-window.ts",
     "resync": "tsx --env-file-if-exists=.env src/scripts/resync.ts",
     "colleges:import": "tsx --env-file-if-exists=.env src/scripts/colleges-import.ts",
+    "colleges:seed-api": "tsx --env-file-if-exists=.env src/scripts/colleges-seed-api.ts",
     "leaderboard:verify": "tsx --env-file-if-exists=.env src/scripts/leaderboard-verify.ts",
     "leaderboard:seed": "tsx --env-file-if-exists=.env src/scripts/leaderboard-seed.ts",
     "leaderboard:load": "tsx src/scripts/leaderboard-load.ts"

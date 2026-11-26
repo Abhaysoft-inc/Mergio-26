@@ -2,6 +2,7 @@ import "server-only";
 import { prisma, Prisma } from "@repo/db";
 import { collegeSlug, normaliseCollegeName } from "@repo/scoring";
 import { enqueueJobs } from "@repo/scoring/server";
+import { unstable_cache } from "next/cache";
 import { activeSeason } from "./projects-server";
 import { likeText } from "./search";
 
@@ -14,22 +15,43 @@ export type CollegeOption = { id: string; slug: string; name: string; state: str
 
 const optionSelect = { id: true, slug: true, name: true, state: true, city: true } as const;
 
-/** Colleges matching a search, by name, alias or state. */
-export async function searchColleges(query: string, limit = 10): Promise<CollegeOption[]> {
-  const text = query.trim();
-  if (text.length < 2) return [];
-  const normalized = normaliseCollegeName(text);
-  return prisma.college.findMany({
-    where: {
-      OR: [
-        { name: { contains: likeText(text), mode: "insensitive" } },
-        ...(normalized ? [{ aliases: { some: { normalized: { contains: likeText(normalized) } } } }] : []),
-      ],
-    },
-    orderBy: [{ name: "asc" }],
-    take: limit,
-    select: optionSelect,
-  });
+const fetchCollegePage = unstable_cache(
+  async (text: string, limit: number, offset: number): Promise<{ colleges: CollegeOption[]; hasMore: boolean }> => {
+    const normalized = normaliseCollegeName(text);
+    const where: Prisma.CollegeWhereInput =
+      text.length === 0
+        ? {}
+        : text.length === 1
+          ? { name: { startsWith: likeText(text), mode: "insensitive" } }
+          : {
+              OR: [
+                { name: { contains: likeText(text), mode: "insensitive" } },
+                { city: { contains: likeText(text), mode: "insensitive" } },
+                { state: { contains: likeText(text), mode: "insensitive" } },
+                ...(normalized ? [{ aliases: { some: { normalized: { contains: likeText(normalized) } } } }] : []),
+              ],
+            };
+
+    const rows = await prisma.college.findMany({
+      where,
+      orderBy: [{ name: "asc" }],
+      skip: offset,
+      take: limit + 1,
+      select: optionSelect,
+    });
+    const hasMore = rows.length > limit;
+    return { colleges: hasMore ? rows.slice(0, limit) : rows, hasMore };
+  },
+  ["colleges-search-v1"],
+  { revalidate: 3600 },
+);
+
+/** Paginated colleges matching a search (by name, city, state, or alias), cached for 1 hour. */
+export async function searchColleges(
+  query: string,
+  { limit = 20, offset = 0 }: { limit?: number; offset?: number } = {},
+): Promise<{ colleges: CollegeOption[]; hasMore: boolean }> {
+  return fetchCollegePage(query.trim().toLowerCase(), limit, offset);
 }
 
 /**
@@ -171,8 +193,12 @@ export async function updateCollege(id: string, input: { name: string; state: st
   return { ok: true as const };
 }
 
-/** States that have at least one college, for the leaderboard filter. */
-export async function collegeStates(): Promise<string[]> {
-  const rows = await prisma.college.findMany({ distinct: ["state"], select: { state: true }, orderBy: { state: "asc" } });
-  return rows.map((row) => row.state);
-}
+/** States that have at least one college, for the leaderboard filter (cached 1h). */
+export const collegeStates = unstable_cache(
+  async (): Promise<string[]> => {
+    const rows = await prisma.college.findMany({ distinct: ["state"], select: { state: true }, orderBy: { state: "asc" } });
+    return rows.map((row) => row.state);
+  },
+  ["colleges-states-v1"],
+  { revalidate: 3600 },
+);
