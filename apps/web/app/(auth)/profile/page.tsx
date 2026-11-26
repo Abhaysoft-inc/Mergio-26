@@ -24,9 +24,13 @@ const repoLabel = (url: string) =>
 export default async function ProfilePage() {
   const user = await requireUser();
   const [profile, registrations] = await Promise.all([
-    prisma.profile.findUnique({ where: { userId: user.id } }),
+    prisma.profile.findUnique({
+      where: { userId: user.id },
+      select: { college: true, graduationYear: true, phone: true, discord: true },
+    }),
     prisma.registration.findMany({
       where: { userId: user.id },
+      select: { id: true, role: true, status: true, repoUrl: true },
       orderBy: { createdAt: "asc" },
     }),
   ]);

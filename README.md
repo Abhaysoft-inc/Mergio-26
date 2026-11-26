@@ -143,6 +143,34 @@ Ensure the `DATABASE_URL` matches across all `.env` files. The default connectio
 DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5433/mergio?schema=public"
 ```
 
+## GitHub sign-in & Sessions
+
+Registration uses [Better Auth](https://www.better-auth.com) with GitHub as the only provider. We request only `read:user` and `user:email`, never repository access.
+
+1. On GitHub, go to **Settings > Developer settings > OAuth Apps > New OAuth App**.
+2. Set **Homepage URL** to `https://mergio.in`. Under **Redirect URIs** add `http://localhost:3001/api/auth/callback/github` and `https://mergio.in/api/auth/callback/github`. Leave wildcard matching, device flow and token expiry off.
+3. Copy the **Client ID** into `GITHUB_CLIENT_ID`. Generate a **Client secret** and copy it into `GITHUB_CLIENT_SECRET`.
+4. Generate `BETTER_AUTH_SECRET` with `openssl rand -base64 32`, and set `BETTER_AUTH_URL="http://localhost:3001"`.
+5. Optional: list GitHub usernames in `ADMIN_GITHUB_LOGINS` (comma separated) to make those people super admins the next time they sign in.
+
+Returning people sign in at `/login`; new people start at `/register`, which asks for a role first. Both accept a `next` path to come back to, and only paths on this site are followed.
+
+### Sessions & Bans
+
+Sessions are rows in the `Session` table, referenced by an httpOnly, `SameSite=Lax` cookie (`Secure` whenever `BETTER_AUTH_URL` is https). They last 30 days and roll: a session used after it is a day old is extended to 30 days from then, with a 60-second cookie cache so bans and revocations take effect within a minute.
+
+Organizers can ban a person (`User.bannedAt`, `banReason`), which deletes all of their sessions in one transaction and blocks future sign-ins.
+
+### Auth and admin API
+
+JSON endpoints under `/api/v1` (authenticated with the session cookie; writes require `Content-Type: application/json`):
+- `GET /auth/github?next=/dashboard` — starts GitHub sign-in and redirects back to `next`
+- `POST /auth/logout` — deletes the current session and clears the cookie (`204`)
+- `GET /me` — returns `{id, githubId, githubLogin, name, email, image, staffRole, roles, registrations, createdAt}`
+- `POST /admin/users/{id}/ban` / `DELETE /admin/users/{id}/ban` — ban or unban a user
+- `DELETE /admin/users/{id}/sessions` — revoke all sessions for a user
+- `PUT /admin/users/{id}/staff-role` — set `staffRole` (`"ORGANIZER" | "SUPER_ADMIN" | null`)
+
 Configure your GitHub OAuth credentials in `apps/web/.env` and `apps/super-admin/.env` (see [Authentication](#github-authentication) below).
 
 #### 3. Initialize the database

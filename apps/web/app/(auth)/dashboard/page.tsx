@@ -38,6 +38,7 @@ export default async function DashboardPage() {
   const [registrations, projects, season] = await Promise.all([
     prisma.registration.findMany({
       where: { userId: user.id },
+      select: { id: true, role: true, status: true },
       orderBy: { createdAt: "asc" },
     }),
     prisma.project.findMany({

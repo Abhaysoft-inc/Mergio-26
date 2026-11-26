@@ -33,10 +33,9 @@ export default async function RegisterPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const params = await searchParams;
+  const [params, session] = await Promise.all([searchParams, getSession()]);
   const preselect = parseRole(params.role);
   const fromSignIn = params.signin === "1";
-  const session = await getSession();
 
   if (!session) {
     return (

@@ -1,16 +1,18 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { loginPath } from "@/lib/login-redirect";
 
 // Optimistic check only: it looks for the session cookie and never touches the database.
-// A forged or expired cookie gets past here and is rejected by requireUser() in lib/dal.ts.
+// A forged, expired or revoked cookie gets past here and is rejected by requireUser() in
+// lib/dal.ts, which also does the role checks (RBAC).
 export function proxy(request: NextRequest) {
   if (!getSessionCookie(request)) {
-    // Project pages are for maintainers, so start their sign-in with that role picked.
-    const target = request.nextUrl.pathname.startsWith("/projects")
-      ? "/register?role=maintainer"
-      : "/register";
-    return NextResponse.redirect(new URL(target, request.url));
+    const { pathname, search } = request.nextUrl;
+    if (pathname.startsWith("/projects")) {
+      return NextResponse.redirect(new URL("/register?role=maintainer", request.url));
+    }
+    return NextResponse.redirect(new URL(loginPath(pathname + search), request.url));
   }
   return NextResponse.next();
 }

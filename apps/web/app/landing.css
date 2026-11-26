@@ -814,6 +814,14 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
 .join-role:has(input:checked) .join-radio::after { transform: scale(1); }
 .join-hint { margin-top: 12px; font-size: 13px; color: var(--dim); }
 .join-card .join-submit { margin-top: 20px; width: 100%; min-height: 50px; font-size: 16px; }
+/* /login: one narrow card, centred, with a full-width GitHub button. */
+.login-card { max-width: 440px; align-items: stretch; text-align: center; }
+.login-card .auth-lead { font-size: 16px; }
+.login-form { display: flex; flex-direction: column; }
+.login-form .join-submit { width: 100%; min-height: 50px; font-size: 16px; }
+.login-card .join-privacy { margin-top: 0; }
+.login-alt { font-size: 14px; color: var(--muted); }
+.login-alt a { color: var(--ice); text-decoration: underline; text-underline-offset: 3px; }
 .join-privacy { margin-top: 16px; font-size: 13px; color: var(--dim); text-align: center; text-wrap: balance; }
 .join-privacy svg { display: inline-block; vertical-align: -2px; margin-right: 6px; color: var(--green); }
 [data-theme="light"] .join-role { background: rgba(255, 255, 255, .6); }
