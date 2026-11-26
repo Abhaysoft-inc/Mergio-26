@@ -20,23 +20,35 @@ enum RegistrationStatus {
   REJECTED
 }
 
+// Platform staff. Everyone else's roles (contributor, mentor, project admin) come from
+// their approved registrations; see lib/roles.ts in apps/web.
+enum StaffRole {
+  ORGANIZER
+  SUPER_ADMIN
+}
+
 // ---------------------------------------------------------------------------
 // Auth (Better Auth). Column names follow what the Better Auth Prisma adapter
 // expects, so change them only together with lib/auth.ts in apps/web.
 // ---------------------------------------------------------------------------
 
 model User {
-  id            String   @id
+  id            String     @id
   name          String
-  email         String   @unique
-  emailVerified Boolean  @default(false)
+  email         String     @unique
+  emailVerified Boolean    @default(false)
   image         String?
-  // GitHub's numeric id lives in Account.accountId (it never changes).
+  // GitHub's numeric id lives in Account.accountId (it never changes), and everything
+  // that belongs to a person (points, PRs) is keyed by User.id, never by login.
   // The login is refreshed on every sign-in because users can rename themselves.
-  githubLogin   String?  @unique
-  isAdmin       Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  githubLogin   String?    @unique
+  // Null for everyone who is not platform staff.
+  staffRole     StaffRole?
+  // Set while the person is banned. Banning also deletes their sessions.
+  bannedAt      DateTime?
+  banReason     String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   sessions      Session[]
   accounts      Account[]
@@ -97,16 +109,16 @@ model Verification {
 
 // One per user: details shared across every role they sign up for.
 model Profile {
-  id                      String    @id @default(cuid())
-  userId                  String    @unique
+  id                      String   @id @default(cuid())
+  userId                  String   @unique
   college                 String
   graduationYear          Int
   phone                   String?
   discord                 String?
   codeOfConductAcceptedAt DateTime
-  updatesOptIn            Boolean   @default(false)
-  createdAt               DateTime  @default(now())
-  updatedAt               DateTime  @updatedAt
+  updatesOptIn            Boolean  @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getSession } from "@/lib/dal";
+import { githubSignInUrl } from "@/lib/sign-in";
 import {
   parseRole,
   registrationSchema,
@@ -14,14 +15,12 @@ import {
 export async function signInWithGitHub(formData: FormData) {
   // Only ever return to our own registration page. The role is validated, never echoed raw.
   const role = parseRole(formData.get("role")?.toString());
-  const callbackURL = role ? `/register?role=${role.toLowerCase()}` : "/register";
+  redirect(await githubSignInUrl(role ? `/register?role=${role.toLowerCase()}` : "/register"));
+}
 
-  const { url } = await auth.api.signInSocial({
-    body: { provider: "github", callbackURL },
-    headers: await headers(),
-  });
-  if (!url) throw new Error("GitHub sign-in did not return a redirect URL");
-  redirect(url);
+/** Sign-in from /login. `next` is checked by githubSignInUrl, so it can only be a local path. */
+export async function logInWithGitHub(formData: FormData) {
+  redirect(await githubSignInUrl(formData.get("next")?.toString()));
 }
 
 export async function signOutAction() {

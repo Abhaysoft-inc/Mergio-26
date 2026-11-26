@@ -80,11 +80,54 @@ Registration uses [Better Auth](https://www.better-auth.com) with GitHub as the 
 2. Set **Homepage URL** to `https://mergio.in`. Under **Redirect URIs** add `http://localhost:3001/api/auth/callback/github` and `https://mergio.in/api/auth/callback/github`. Leave wildcard matching, device flow and token expiry off.
 3. Copy the **Client ID** into `GITHUB_CLIENT_ID`. Generate a **Client secret** and copy it into `GITHUB_CLIENT_SECRET`.
 4. Generate `BETTER_AUTH_SECRET` with `openssl rand -base64 32`, and set `BETTER_AUTH_URL="http://localhost:3001"`.
-5. Optional: list GitHub usernames in `ADMIN_GITHUB_LOGINS` (comma separated) to make them admins the next time they sign in.
+5. Optional: list GitHub user IDs (numbers, comma separated) in `SUPER_ADMIN_GITHUB_IDS` to make those people super admins the next time they sign in. Find an ID at `https://api.github.com/users/<username>`. IDs are used because usernames can change: a username freed by a rename can be claimed by someone else.
 
 The same app serves dev and production because it has both redirect URIs. Each environment sets its own `BETTER_AUTH_URL` (`http://localhost:3001` locally, `https://mergio.in` in production), and Better Auth builds the redirect URI from it. Both environments share one client secret, so give teammates a separate dev app once more than one person runs the project locally. In production, also set `AUTH_COOKIE_DOMAIN=".mergio.in"` so the session cookie is shared with `admin.mergio.in`.
 
-Sign-in is checked in two places. `apps/web/proxy.ts` only looks for a session cookie and redirects early. The real check is `requireUser()` in `apps/web/lib/dal.ts`, so call it in every page and action that needs a signed-in user.
+Returning people sign in at `/login`; new people start at `/register`, which asks for a role first. Both accept a `next` path to come back to, and only paths on this site are followed.
+
+Sign-in is checked in two places. `apps/web/proxy.ts` only looks for a session cookie and redirects early to `/login?next=…`. The real check is in `apps/web/lib/dal.ts`: call `requireUser()` in every page and action that needs a signed-in user, and `requireRole("ORGANIZER")` (or another role) where a role is needed. API routes use `withRole()` from `apps/web/lib/rbac.ts`, which answers 401 or 403 instead of redirecting.
+
+People are matched by GitHub's numeric user ID (`Account.accountId`), never by username, so someone who renames their GitHub account signs back in to the same Mergio user and keeps their points. Their name, avatar and `githubLogin` are refreshed on every sign-in. If someone takes over a username that another Mergio user used to have, the old holder's `githubLogin` is cleared until they next sign in.
+
+### Sessions
+
+Sessions are rows in the `Session` table, referenced by an httpOnly, `SameSite=Lax` cookie that is `Secure` whenever `BETTER_AUTH_URL` is https. They last 30 days and roll: a session used after it is a day old is extended to 30 days from then. Deleting a session row signs that device out on its next request. The session cookie cache is off on purpose so that revocation is immediate; if it is ever turned on, keep its `maxAge` at 60 seconds or less.
+
+### Platform roles
+
+The roles from the PRD (section 2), as computed by `rolesOf()` in `apps/web/lib/roles.ts`:
+
+| Role | Who holds it |
+| --- | --- |
+| Visitor | Everyone, signed in or not |
+| Contributor | An `APPROVED` contributor registration |
+| Mentor | An `APPROVED` mentor registration |
+| Project admin | An `APPROVED` maintainer registration (owning a particular project is checked per project) |
+| Organizer | `User.staffRole = ORGANIZER`, or a super admin |
+| Super admin | `User.staffRole = SUPER_ADMIN` |
+
+Super admins come from `SUPER_ADMIN_GITHUB_IDS` and can make other people organizers or super admins through the API below.
+
+### Bans
+
+Organizers can ban a person. A ban sets `User.bannedAt` and `banReason` and deletes all of that person's sessions in the same transaction, so they are signed out on their next request, well inside the one-minute target. A banned person who tries to sign in again is stopped before a session is created and lands on `/login` with an explanation. Organizers can only be banned by a super admin, super admins can't be banned (remove their staff role first), and nobody can ban or demote themselves.
+
+### Auth and admin API
+
+JSON endpoints under `/api/v1`, authenticated with the same session cookie as the site. Writes with a body must send `Content-Type: application/json` (cross-site forms can't, which protects against CSRF). Errors look like `{"error": {"message": "..."}}`, with status 401 when signed out and 403 when the role is missing.
+
+| Method and path | Who | What |
+| --- | --- | --- |
+| `GET /auth/github?next=/dashboard` | anyone | Redirects to GitHub to sign in, then back to `next` (a path on this site; default `/dashboard`). Failed sign-ins land on `/login?error=…` |
+| `POST /auth/logout` | anyone | Deletes the current session and clears the cookie. `204`, also when nobody was signed in |
+| `GET /me` | signed in | `{id, githubId, githubLogin, name, email, image, staffRole, roles, registrations, createdAt}`. `githubId` is a string |
+| `POST /admin/users/{id}/ban` | organizers | `{"reason": "..."}` (required, up to 500 characters). Returns `{bannedAt, revokedSessions}` |
+| `DELETE /admin/users/{id}/ban` | organizers | Lifts the ban. Returns `{unbanned}` (false if they weren't banned) |
+| `DELETE /admin/users/{id}/sessions` | organizers | Signs the person out everywhere without banning them. Returns `{revokedSessions}` |
+| `PUT /admin/users/{id}/staff-role` | super admins | `{"staffRole": "ORGANIZER" \| "SUPER_ADMIN" \| null}`. Returns `{staffRole}` |
+
+`{id}` is the Mergio user ID (`User.id`). The GitHub OAuth callback itself stays at Better Auth's `/api/auth/callback/github`, the URL registered with the GitHub OAuth app.
 
 ### Roles and registration
 
