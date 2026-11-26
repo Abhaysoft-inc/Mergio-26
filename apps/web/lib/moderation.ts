@@ -11,7 +11,7 @@ import { isOrganizer, isSuperAdmin, type StaffRoleName } from "./roles";
 //   demote them first. Nobody can act on themselves, so staff can't lock themselves out.
 // - Only super admins can change staff roles.
 
-type Actor = { id: string; staffRole?: unknown };
+type Actor = { id: string; staffRole?: unknown; isAdmin?: unknown; isSuperAdmin?: unknown };
 
 export type ModerationResult<T> =
   | { ok: true; data: T }
