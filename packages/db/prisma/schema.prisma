@@ -183,6 +183,7 @@ model College {
   profiles Profile[]
 
   @@unique([source, sourceId])
+  @@index([name])
   @@index([state])
 }
 
