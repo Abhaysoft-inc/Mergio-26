@@ -113,6 +113,13 @@ export async function setStaffRole(
   if (staffRole && target.bannedAt) {
     return fail(409, "This user is banned. Unban them before giving them a staff role.");
   }
-  await prisma.user.update({ where: { id: targetId }, data: { staffRole } });
+  await prisma.user.update({
+    where: { id: targetId },
+    data: {
+      staffRole,
+      isAdmin: staffRole !== null,
+      isSuperAdmin: staffRole === "SUPER_ADMIN",
+    },
+  });
   return { ok: true, data: { staffRole } };
 }

@@ -9,11 +9,20 @@ import { loginPath } from "@/lib/login-redirect";
 export function proxy(request: NextRequest) {
   if (!getSessionCookie(request)) {
     const { pathname, search } = request.nextUrl;
+    if (pathname.startsWith("/projects")) {
+      return NextResponse.redirect(new URL("/register?role=maintainer", request.url));
+    }
     return NextResponse.redirect(new URL(loginPath(pathname + search), request.url));
   }
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/profile/:path*"],
+  matcher: [
+    "/dashboard/:path*",
+    "/profile/:path*",
+    "/projects/new",
+    "/projects/:slug/manage",
+    "/admin/:path*",
+  ],
 };

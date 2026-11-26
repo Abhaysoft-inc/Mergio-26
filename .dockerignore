@@ -1,0 +1,12 @@
+# Docker doesn't read .gitignore. Without these, `COPY . .` would put local .env secrets and
+# build output into the image.
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+.git
+**/*.pem
+**/registrations*.csv

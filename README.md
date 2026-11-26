@@ -1,9 +1,10 @@
-# Mergio-26
+# Mergio
 
-A Turborepo monorepo with a Next.js app, a shared UI library and a Prisma 7 + PostgreSQL database package.
+> **A Nationwide Open-Source Initiative Presented by Google Developer Groups (GDG) on Campus — KNIT Sultanpur, Uttar Pradesh**
 
-## Project structure
+Mergio is a premier nationwide open-source program designed to foster engineering excellence, open-source adoption, and large-scale collaborative development across India. Built to connect ambitious developers, active repository maintainers, and seasoned mentors, Mergio provides a high-impact platform where talent collaborates on production-grade software.
 
+---
 ```
 apps/
   web/                    Next.js 16 app (http://localhost:3001)
@@ -11,22 +12,112 @@ apps/
   backend/                Express 5 + TypeScript API (http://localhost:4000)
 packages/
   db/                     Prisma 7 schema, migrations and the shared `prisma` client
+  scoring/                Scoring engine (pure, unit-tested) and shared ranking/queue helpers
   ui/                     Shared React components (Tailwind CSS v4)
   tailwind-config/        Shared Tailwind theme and PostCSS config
   eslint-config/          Shared ESLint configs
   typescript-config/      Shared tsconfig files
-docker-compose.yml        Local PostgreSQL for development
+docker-compose.yml        Local PostgreSQL and Redis for development
 ```
 
-## Prerequisites
+## About Mergio
+
+Open-source software powers modern technology infrastructure. Mergio is architected to scale open-source culture across universities and developer communities throughout India. The initiative bridges the gap between academic learning and industry engineering standards by creating an environment where:
+
+- **Developers** solve real architectural challenges, work within production Git workflows, submit high-quality pull requests, and gain nationwide recognition.
+- **Project Maintainers** scale their codebases, accelerate product roadmaps, and build sustained contributor communities around impactful open-source repositories.
+- **Domain Mentors** guide technical design decisions, maintain review rigor, and uphold engineering best practices across domains.
+
+All contributions are tracked through a transparent, merit-based scoring system and showcased on a public nationwide leaderboard.
+
+---
+
+## Program Structure & Governance
+
+Mergio is organized and governed by **GDG on Campus KNIT** (Kamla Nehru Institute of Technology, Sultanpur, Uttar Pradesh). The team oversees repository curation, platform infrastructure, issue standardization, and review integrity.
+
+### Core Ecosystem Roles
+
+Participation in Mergio is organized across three specialized tracks:
+
+1. **Contributors**
+   - Developers and engineers across India contributing to curated open-source projects.
+   - Tackle challenges across distributed systems, modern web platforms, mobile frameworks, developer tooling, and AI/ML pipelines.
+   - Deliver clean, tested code, participate in peer reviews, and accumulate points based on issue complexity and impact.
+
+2. **Maintainers**
+   - Authors and core leads of established open-source repositories.
+   - Define technical roadmaps, curate issues categorized by complexity (`easy`, `medium`, `hard`), and establish contribution standards.
+   - Review incoming pull requests, provide architectural feedback, and merge high-standard code into production branches.
+
+3. **Mentors**
+   - Senior engineers, alumni, and domain specialists across core technical disciplines.
+   - Provide architectural guidance, assist with complex code reviews, and unblock teams on technical roadblocks.
+   - Ensure contributions adhere to security standards, performance benchmarks, and clean code principles.
+
+### Program Milestones
+
+The program operates across structured, synchronized phases:
+
+1. **Repository Onboarding & Audit**: Maintainers submit repositories; the organizing committee audits project roadmaps, contribution documentation, and issue readiness.
+2. **National Registration & Orientation**: Registrations open nationwide via GitHub OAuth, allowing participants to assemble profiles and browse vetted codebases.
+3. **Contribution Sprints**: Intensive engineering cycles where developers claim issues, open pull requests, collaborate with maintainers, and score points on the leaderboard.
+4. **Code Freeze & Final Audits**: Contribution cutoff followed by final maintainer reviews and audit verification.
+5. **Leaderboard Finalization & Certification**: Publication of nationwide rankings and distribution of verifiable, official credentials recognizing contributors, maintainers, and mentors.
+
+---
+
+## Technical Architecture
+
+The Mergio platform is architected as a high-performance monorepo uniting the public participant portal, the administrative console, backend services, and shared libraries.
+
+### Monorepo Structure
+
+```
+apps/
+  web/                    Next.js 16 public participant portal (http://localhost:3001)
+  super-admin/            Next.js 16 organizer admin console (http://localhost:3002)
+  backend/                Express 5 + TypeScript API service (http://localhost:4000)
+packages/
+  db/                     Prisma 7 schema, PostgreSQL migrations and shared client
+  ui/                     Shared design system built on React & Tailwind CSS v4
+  tailwind-config/        Shared styling and theme configurations
+  eslint-config/          Shared linting configurations
+  typescript-config/      Shared TypeScript configurations
+docker-compose.yml        Local PostgreSQL 16 container setup
+```
+
+### Application Stack
+
+- **Participant Web Portal (`apps/web`)**: Public platform for project discovery, registration, guidelines, milestone timelines, and real-time national leaderboard analytics.
+- **Organizer Admin Console (`apps/super-admin`)**: Secured operations hub for the GDG KNIT organizing committee to manage:
+  - Project review and maintainer approval queues.
+  - Mentor application screening.
+  - Nationwide participant search and profile inspection with full score ledgers.
+  - Program season management and event timelines with change history diff tracking.
+  - Manual score adjustments with mandatory audit justifications.
+  - GitHub App webhook health, delivery logs, failure rate tracking, and repository resyncs.
+  - Comprehensive CSV exports for participants, merged pull requests, final rankings, and certificate issuing batches.
+  - Immutable audit trail recording every administrative state mutation.
+- **Backend API (`apps/backend`)**: Express 5 service powering webhook processing, external integrations, and background automations.
+
+---
+
+## Local Development Setup
+
+### Prerequisites
 
 - [Node.js](https://nodejs.org/) 24 or newer
 - [pnpm](https://pnpm.io/) (`npm install -g pnpm` or `corepack enable`)
-- A PostgreSQL database. See [Database setup](#database-setup) for options.
+- [Docker](https://docs.docker.com/get-docker/) (for local PostgreSQL database)
 
-## Getting started
+---
 
-### 1. Clone and install
+### Step-by-Step Setup
+
+#### 1. Clone the repository and install dependencies
+
+From the project root:
 
 ```sh
 git clone git@github.com:TheCodeHeist-Coder/Mergio-26.git
@@ -34,45 +125,25 @@ cd Mergio-26
 pnpm install
 ```
 
-### 2. Configure environment variables
+> **Note**: As a pnpm monorepo, dependencies for all applications and packages are resolved and installed simultaneously from the **root directory**.
+
+#### 2. Configure environment variables
+
+Generate the environment configuration files for each workspace:
 
 ```sh
 cp packages/db/.env.example packages/db/.env
 cp apps/web/.env.example apps/web/.env
-```
-
-Both files need the same `DATABASE_URL`. Prisma reads `packages/db/.env`, and the Next.js app reads `apps/web/.env`. The default value matches the Docker setup below. If you use a different database, change it in both files.
-
-`apps/web/.env` also holds the sign-in settings. Fill them in using [GitHub sign-in](#github-sign-in) below.
-
-### 3. Set up the database
-
-Choose one of the [database options](#database-setup), then create the tables:
-
-```sh
-pnpm db:migrate
-```
-
-### 4. Start the dev server
-
-```sh
-pnpm dev
-```
-
-The web app runs at http://localhost:3001 and the super admin app at http://localhost:3002.
-
-To run only one app, use `pnpm dev --filter web` or `pnpm dev --filter super-admin`.
-
-The super admin app and the backend also need their own `.env`:
-
-```sh
-cp packages/db/.env.example apps/super-admin/.env
+cp apps/super-admin/.env.example apps/super-admin/.env
 cp apps/backend/.env.example apps/backend/.env
 ```
 
-The backend API runs at http://localhost:4000. `GET /health` checks that the server and database are up.
+Ensure the `DATABASE_URL` matches across all `.env` files. The default connection string configured for the local Docker environment is:
+```env
+DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5433/mergio?schema=public"
+```
 
-## GitHub sign-in
+## GitHub sign-in & Sessions
 
 Registration uses [Better Auth](https://www.better-auth.com) with GitHub as the only provider. We request only `read:user` and `user:email`, never repository access.
 
@@ -82,182 +153,101 @@ Registration uses [Better Auth](https://www.better-auth.com) with GitHub as the 
 4. Generate `BETTER_AUTH_SECRET` with `openssl rand -base64 32`, and set `BETTER_AUTH_URL="http://localhost:3001"`.
 5. Optional: list GitHub usernames in `ADMIN_GITHUB_LOGINS` (comma separated) to make those people super admins the next time they sign in.
 
-The same app serves dev and production because it has both redirect URIs. Each environment sets its own `BETTER_AUTH_URL` (`http://localhost:3001` locally, `https://mergio.in` in production), and Better Auth builds the redirect URI from it. Both environments share one client secret, so give teammates a separate dev app once more than one person runs the project locally. In production, also set `AUTH_COOKIE_DOMAIN=".mergio.in"` so the session cookie is shared with `admin.mergio.in`.
-
 Returning people sign in at `/login`; new people start at `/register`, which asks for a role first. Both accept a `next` path to come back to, and only paths on this site are followed.
 
-Sign-in is checked in two places. `apps/web/proxy.ts` only looks for a session cookie and redirects early to `/login?next=…`. The real check is in `apps/web/lib/dal.ts`: call `requireUser()` in every page and action that needs a signed-in user, and `requireRole("ORGANIZER")` (or another role) where a role is needed. API routes use `withRole()` from `apps/web/lib/rbac.ts`, which answers 401 or 403 instead of redirecting.
+### Sessions & Bans
 
-People are matched by GitHub's numeric user ID (`Account.accountId`), never by username, so someone who renames their GitHub account signs back in to the same Mergio user and keeps their points. Their name, avatar and `githubLogin` are refreshed on every sign-in. If someone takes over a username that another Mergio user used to have, the old holder's `githubLogin` is cleared until they next sign in.
+Sessions are rows in the `Session` table, referenced by an httpOnly, `SameSite=Lax` cookie (`Secure` whenever `BETTER_AUTH_URL` is https). They last 30 days and roll: a session used after it is a day old is extended to 30 days from then, with a 60-second cookie cache so bans and revocations take effect within a minute.
 
-### Sessions
-
-Sessions are rows in the `Session` table, referenced by an httpOnly, `SameSite=Lax` cookie that is `Secure` whenever `BETTER_AUTH_URL` is https. They last 30 days and roll: a session used after it is a day old is extended to 30 days from then. Deleting a session row signs that device out on its next request. The session cookie cache is off on purpose so that revocation is immediate; if it is ever turned on, keep its `maxAge` at 60 seconds or less.
-
-### Platform roles
-
-The roles from the PRD (section 2), as computed by `rolesOf()` in `apps/web/lib/roles.ts`:
-
-| Role | Who holds it |
-| --- | --- |
-| Visitor | Everyone, signed in or not |
-| Contributor | An `APPROVED` contributor registration |
-| Mentor | An `APPROVED` mentor registration |
-| Project admin | An `APPROVED` maintainer registration (owning a particular project is checked per project) |
-| Organizer | `User.staffRole = ORGANIZER`, or a super admin |
-| Super admin | `User.staffRole = SUPER_ADMIN` |
-
-Super admins come from `ADMIN_GITHUB_LOGINS` and can make other people organizers or super admins through the API below.
-
-### Bans
-
-Organizers can ban a person. A ban sets `User.bannedAt` and `banReason` and deletes all of that person's sessions in the same transaction, so they are signed out on their next request, well inside the one-minute target. A banned person who tries to sign in again is stopped before a session is created and lands on `/login` with an explanation. Organizers can only be banned by a super admin, super admins can't be banned (remove their staff role first), and nobody can ban or demote themselves.
+Organizers can ban a person (`User.bannedAt`, `banReason`), which deletes all of their sessions in one transaction and blocks future sign-ins.
 
 ### Auth and admin API
 
-JSON endpoints under `/api/v1`, authenticated with the same session cookie as the site. Writes with a body must send `Content-Type: application/json` (cross-site forms can't, which protects against CSRF). Errors look like `{"error": {"message": "..."}}`, with status 401 when signed out and 403 when the role is missing.
+JSON endpoints under `/api/v1` (authenticated with the session cookie; writes require `Content-Type: application/json`):
+- `GET /auth/github?next=/dashboard` — starts GitHub sign-in and redirects back to `next`
+- `POST /auth/logout` — deletes the current session and clears the cookie (`204`)
+- `GET /me` — returns `{id, githubId, githubLogin, name, email, image, staffRole, roles, registrations, createdAt}`
+- `POST /admin/users/{id}/ban` / `DELETE /admin/users/{id}/ban` — ban or unban a user
+- `DELETE /admin/users/{id}/sessions` — revoke all sessions for a user
+- `PUT /admin/users/{id}/staff-role` — set `staffRole` (`"ORGANIZER" | "SUPER_ADMIN" | null`)
 
-| Method and path | Who | What |
-| --- | --- | --- |
-| `GET /auth/github?next=/dashboard` | anyone | Redirects to GitHub to sign in, then back to `next` (a path on this site; default `/dashboard`). Failed sign-ins land on `/login?error=…` |
-| `POST /auth/logout` | anyone | Deletes the current session and clears the cookie. `204`, also when nobody was signed in |
-| `GET /me` | signed in | `{id, githubId, githubLogin, name, email, image, staffRole, roles, registrations, createdAt}`. `githubId` is a string |
-| `POST /admin/users/{id}/ban` | organizers | `{"reason": "..."}` (required, up to 500 characters). Returns `{bannedAt, revokedSessions}` |
-| `DELETE /admin/users/{id}/ban` | organizers | Lifts the ban. Returns `{unbanned}` (false if they weren't banned) |
-| `DELETE /admin/users/{id}/sessions` | organizers | Signs the person out everywhere without banning them. Returns `{revokedSessions}` |
-| `PUT /admin/users/{id}/staff-role` | super admins | `{"staffRole": "ORGANIZER" \| "SUPER_ADMIN" \| null}`. Returns `{staffRole}` |
+Configure your GitHub OAuth credentials in `apps/web/.env` and `apps/super-admin/.env` (see [Authentication](#github-authentication) below).
 
-`{id}` is the Mergio user ID (`User.id`). The GitHub OAuth callback itself stays at Better Auth's `/api/auth/callback/github`, the URL registered with the GitHub OAuth app.
+#### 3. Initialize the database
 
-### Roles and registration
-
-People pick any of **Contributor**, **Maintainer** and **Mentor** and can hold several. Each role is its own `Registration` row with a status. Contributors are `APPROVED` immediately. Maintainers and mentors start as `PENDING` until an admin reviews them. Shared details (college, graduation year, phone, Discord) live in one `Profile` per person.
-
-### Exporting leads
-
-Until the admin dashboard exists, dump every registration to CSV:
-
-```sh
-pnpm --silent export:registrations > registrations.csv
-```
-
-The file contains personal data. `registrations*.csv` is git-ignored, so keep it that way.
-
-## Database setup
-
-The app works with any PostgreSQL database. Choose one of these options and put its connection string in `DATABASE_URL`.
-
-### Option A: Docker Compose (recommended)
-
-You need [Docker](https://docs.docker.com/get-docker/) installed. From the repo root:
+Start the PostgreSQL service using Docker Compose:
 
 ```sh
 docker compose up -d
 ```
 
-This starts PostgreSQL 16 on **port 5433**. That port avoids a clash with any Postgres you already run on 5432. The default URL works as-is:
-
-```
-DATABASE_URL="postgresql://postgres:postgres@localhost:5433/mergio?schema=public"
-```
-
-Useful commands:
+Run schema migrations and generate the Prisma Client:
 
 ```sh
-docker compose ps         # check status
-docker compose down       # stop (data is kept)
-docker compose down -v    # stop and delete all data
+pnpm db:migrate
+pnpm db:generate
 ```
 
-### Option B: Plain `docker run`
+#### 4. Launch development services
 
-Use this to run the same database without Docker Compose:
+Start all platform applications concurrently:
 
 ```sh
-docker run -d --name mergio-postgres \
-  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=mergio \
-  -p 5433:5432 -v mergio-postgres-data:/var/lib/postgresql/data \
-  postgres:16-alpine
+pnpm dev
 ```
 
-The default `DATABASE_URL` works as-is.
+Available endpoints:
+- **Participant Web Portal**: http://localhost:3001
+- **Organizer Super-Admin**: http://localhost:3002
+- **Backend API**: http://localhost:4000
 
-### Option C: PostgreSQL installed locally
-
-Install PostgreSQL with your system package manager (`sudo apt install postgresql`, `brew install postgresql@16`, or the [Windows installer](https://www.postgresql.org/download/windows/)). Then create a database:
-
+To launch an individual service:
 ```sh
-createdb mergio
+pnpm dev --filter web          # Participant portal only
+pnpm dev --filter super-admin  # Admin console only
+pnpm dev --filter backend      # Backend API only
 ```
 
-Update `DATABASE_URL` with your local user, password and port (usually 5432):
+---
 
-```
-DATABASE_URL="postgresql://<user>:<password>@localhost:5432/mergio?schema=public"
-```
+## GitHub Authentication & Authorization
 
-### Option D: Hosted PostgreSQL (no local install)
+Authentication is handled via [Better Auth](https://www.better-auth.com) backed by GitHub OAuth.
 
-Create a free database on a hosted provider such as [Neon](https://neon.tech), [Supabase](https://supabase.com) or [Prisma Postgres](https://www.prisma.io/postgres). Copy its connection string into `DATABASE_URL`. Hosted providers usually require SSL, so add `?sslmode=require` if the provider's string doesn't already include it.
+1. Register a GitHub OAuth App (**Settings > Developer settings > OAuth Apps > New OAuth App**).
+2. Set **Homepage URL** to `http://localhost:3001` (or your production domain).
+3. Under **Redirect URIs**, register:
+   - `http://localhost:3001/api/auth/callback/github`
+   - `https://mergio.in/api/auth/callback/github`
+4. Copy the **Client ID** into `GITHUB_CLIENT_ID` and **Client Secret** into `GITHUB_CLIENT_SECRET`.
+5. Set `BETTER_AUTH_SECRET` to a cryptographically secure random value (`openssl rand -base64 32`).
+6. **Administrator Privileges**: In `apps/web/.env`, add your GitHub username to `ADMIN_GITHUB_LOGINS`:
+   ```env
+   ADMIN_GITHUB_LOGINS="your_github_username"
+   ```
+   Upon sign-in, your account will be granted `isAdmin: true` in the database, granting access to the Super-Admin operations console at `http://localhost:3002`.
 
-> Use the **direct** (non-pooled) connection string when running migrations.
+---
 
-## Working with the database
+## Repository Commands
 
-The schema is in [packages/db/prisma/schema.prisma](packages/db/prisma/schema.prisma). After you change it:
+All project workflows can be triggered from the monorepo root:
 
-```sh
-pnpm db:migrate     # create and apply a migration (asks for a name)
-```
+| Command | Description |
+|---|---|
+| `pnpm dev` | Launch all applications in development mode |
+| `pnpm build` | Compile and build all applications and packages |
+| `pnpm lint` | Execute ESLint verification across workspaces |
+| `pnpm check-types` | Run TypeScript type checks across workspaces |
+| `pnpm format` | Enforce code formatting with Prettier |
+| `pnpm db:migrate` | Apply schema migrations in development |
+| `pnpm db:generate` | Rebuild Prisma client types |
+| `pnpm db:studio` | Launch Prisma Studio database inspector at `http://localhost:5555` |
 
-Other commands:
+---
 
-| Command            | What it does                                            |
-| ------------------ | ------------------------------------------------------- |
-| `pnpm db:generate` | Regenerate the Prisma client (also runs before `dev`/`build`) |
-| `pnpm db:migrate`  | Create and apply a new migration in development         |
-| `pnpm db:push`     | Sync the schema without creating a migration (prototyping) |
-| `pnpm db:studio`   | Open Prisma Studio to browse and edit data              |
+## Organizing Body
 
-Apply migrations in production with `pnpm --filter @repo/db db:deploy`.
+**Mergio** is organized and spearheaded by **Google Developer Groups (GDG) on Campus — KNIT Sultanpur, Uttar Pradesh**.
 
-### Using the client
-
-Import the shared client in server-side code only, such as server components, route handlers and server actions:
-
-```ts
-import { prisma } from "@repo/db";
-
-const users = await prisma.user.findMany();
-```
-
-## Scripts
-
-Run these from the repo root:
-
-| Command            | What it does                         |
-| ------------------ | ------------------------------------ |
-| `pnpm dev`         | Start all apps in development mode   |
-| `pnpm build`       | Build all apps and packages          |
-| `pnpm lint`        | Lint all packages                    |
-| `pnpm check-types` | Type-check all packages              |
-| `pnpm format`      | Format code with Prettier            |
-
-## Troubleshooting
-
-**`OS file watch limit reached` (Linux).** The dev server watches more files than the default limit allows. Raise the limit:
-
-```sh
-echo -e "fs.inotify.max_user_watches=524288\nfs.inotify.max_user_instances=512" | sudo tee /etc/sysctl.d/60-inotify.conf
-sudo sysctl --system
-```
-
-**Strange build or CSS errors after a crash.** Clear the Next.js cache and restart:
-
-```sh
-rm -rf apps/web/.next && pnpm dev
-```
-
-**`Sign in with GitHub` does nothing or shows an error.** Check that `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are set in `apps/web/.env`, and that the OAuth App's callback URL matches `BETTER_AUTH_URL` exactly. Restart `pnpm dev` after editing `.env`.
-
-**`Can't reach database server`.** Check that your database is running (`docker compose ps` for Docker). Also check that `DATABASE_URL` is the same in `packages/db/.env` and `apps/web/.env`.
+For partnerships, institutional participation, or project submissions, connect with the organizing committee through the official community channels linked on the portal.

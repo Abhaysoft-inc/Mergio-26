@@ -1,10 +1,11 @@
-import { about } from "@/lib/content";
+import { about, accountLink, type Viewer } from "@/lib/content";
 import { SnowLedge } from "./art/snow-ledge";
 import { Icon } from "./icon";
 import { SectionHead } from "./section-head";
 
 // One frosted card with the key numbers and the ways to join.
-export function About() {
+export function About({ viewer }: { viewer: Viewer }) {
+  const account = accountLink(viewer);
   return (
     <section className="section" id="about">
       <div className="aurora soft bright" aria-hidden="true" />
@@ -31,13 +32,17 @@ export function About() {
           </ul>
           <nav className="about-join" aria-label="Get involved">
             {about.roles.map((role) => (
-              <a key={role.who} className="join-item" href={role.href}>
+              <a
+                key={role.who}
+                className="join-item"
+                href={role.account ? account.href : role.href}
+              >
                 <span className="tile-icon">
                   <Icon name={role.icon} size={18} />
                 </span>
                 <span className="join-text">
                   <small>{role.who}</small>
-                  {role.cta}
+                  {role.account ? account.label : role.cta}
                 </span>
                 <span className="join-arrow" aria-hidden="true">
                   →

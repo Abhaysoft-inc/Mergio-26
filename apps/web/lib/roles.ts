@@ -35,7 +35,7 @@ export function parseStaffRole(value: unknown): StaffRoleName | null {
 
 /** Every role a person holds, in PLATFORM_ROLES order. A null user is a visitor. */
 export function rolesOf(
-  user: { staffRole?: unknown } | null,
+  user: { staffRole?: unknown; isAdmin?: unknown; isSuperAdmin?: unknown } | null,
   registrations: { role: RegistrationRole; status: string }[] = [],
 ): PlatformRole[] {
   const held = new Set<PlatformRole>(["VISITOR"]);
@@ -46,17 +46,28 @@ export function rolesOf(
       }
     }
     const staff = parseStaffRole(user.staffRole);
-    if (staff === "SUPER_ADMIN") held.add("SUPER_ADMIN").add("ORGANIZER");
-    if (staff === "ORGANIZER") held.add("ORGANIZER");
+    if (staff === "SUPER_ADMIN" || user.isSuperAdmin === true) {
+      held.add("SUPER_ADMIN").add("ORGANIZER");
+    } else if (staff === "ORGANIZER" || user.isAdmin === true) {
+      held.add("ORGANIZER");
+    }
   }
   return PLATFORM_ROLES.filter((role) => held.has(role));
 }
 
 /** Whether a person may act as an organizer (organizers and super admins). */
-export function isOrganizer(user: { staffRole?: unknown } | null | undefined) {
-  return parseStaffRole(user?.staffRole) !== null;
+export function isOrganizer(
+  user: { staffRole?: unknown; isAdmin?: unknown; isSuperAdmin?: unknown } | null | undefined,
+) {
+  return (
+    parseStaffRole(user?.staffRole) !== null ||
+    user?.isAdmin === true ||
+    user?.isSuperAdmin === true
+  );
 }
 
-export function isSuperAdmin(user: { staffRole?: unknown } | null | undefined) {
-  return parseStaffRole(user?.staffRole) === "SUPER_ADMIN";
+export function isSuperAdmin(
+  user: { staffRole?: unknown; isSuperAdmin?: unknown } | null | undefined,
+) {
+  return parseStaffRole(user?.staffRole) === "SUPER_ADMIN" || user?.isSuperAdmin === true;
 }

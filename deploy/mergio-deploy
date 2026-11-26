@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# The only command GitHub Actions' deploy key may run on the server. Installed once as
+# /usr/local/bin/mergio-deploy and forced for that key in root's authorized_keys (see
+# README.md). It accepts exactly "deploy <40-character commit SHA>", refuses commits that are
+# not on main, checks the commit out and hands over to that commit's deploy/deploy.sh.
+set -euo pipefail
+
+if [[ ! ${SSH_ORIGINAL_COMMAND:-} =~ ^deploy\ ([0-9a-f]{40})$ ]]; then
+  echo "usage: deploy <40-character commit SHA>" >&2
+  exit 2
+fi
+sha=${BASH_REMATCH[1]}
+
+# One deploy at a time. The lock is held until deploy.sh (exec'd below) exits.
+exec 9>/opt/mergio/deploy.lock
+flock -w 900 9 || { echo "Another deploy is still running." >&2; exit 1; }
+
+cd /opt/mergio/src
+git fetch --quiet origin main
+if ! git merge-base --is-ancestor "$sha" origin/main 2>/dev/null; then
+  echo "$sha is not a commit on main; only main is deployed." >&2
+  exit 1
+fi
+git checkout --quiet --detach "$sha"
+exec bash deploy/deploy.sh "$sha"

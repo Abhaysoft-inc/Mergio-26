@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
+import { CollegePicker } from "@/components/colleges/college-picker";
 import { links } from "@/lib/content";
 import {
   ROLES,
@@ -20,6 +21,7 @@ export function RegisterForm({
 }: {
   defaults: {
     college: string;
+    collegeId: string | null;
     graduationYear: string;
     phone: string;
     discord: string;
@@ -115,13 +117,11 @@ export function RegisterForm({
       <div className="field-row">
         <div className="field">
           <label htmlFor="college">College or university</label>
-          <input
-            id="college"
-            name="college"
-            autoComplete="organization"
+          <CollegePicker
             defaultValue={defaults.college}
-            aria-invalid={Boolean(errors.college)}
-            aria-describedby={errors.college ? "college-err" : undefined}
+            defaultId={defaults.collegeId}
+            invalid={Boolean(errors.college)}
+            describedBy={errors.college ? "college-err" : undefined}
           />
           {errors.college && <p className="field-error" id="college-err">{errors.college}</p>}
         </div>
