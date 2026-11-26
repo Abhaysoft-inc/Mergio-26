@@ -28,10 +28,10 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const params = await searchParams;
+  const [params, session] = await Promise.all([searchParams, getSession()]);
   const next = safeNextPath(params.next);
 
-  if (await getSession()) redirect(next ?? "/dashboard");
+  if (session) redirect(next ?? "/dashboard");
 
   const error = errorMessage(
     Array.isArray(params.error) ? params.error[0] : params.error,

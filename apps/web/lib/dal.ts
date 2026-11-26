@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@repo/db";
+import { getSessionCookie } from "better-auth/cookies";
 import { cache } from "react";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
@@ -12,7 +13,9 @@ import { rolesOf, type PlatformRole } from "./roles";
 
 /** The current session, or null. Deduplicated within one request. */
 export const getSession = cache(async () => {
-  const session = await auth.api.getSession({ headers: await headers() });
+  const reqHeaders = await headers();
+  if (!getSessionCookie(reqHeaders)) return null;
+  const session = await auth.api.getSession({ headers: reqHeaders });
   // Banning deletes every session, so this only catches one created in the instant
   // between the ban check at sign-in and the ban itself.
   if (session?.user.bannedAt) return null;
@@ -26,14 +29,20 @@ export async function requireUser(next?: string) {
   return session.user;
 }
 
+/** Registrations for a user, deduplicated within one request. */
+export const getUserRegistrations = cache(async (userId: string) =>
+  prisma.registration.findMany({
+    where: { userId },
+    select: { role: true, status: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  }),
+);
+
 /** Every role the current person holds (always includes VISITOR). Deduplicated within one request. */
 export const getRoles = cache(async (): Promise<PlatformRole[]> => {
   const session = await getSession();
   if (!session) return rolesOf(null);
-  const registrations = await prisma.registration.findMany({
-    where: { userId: session.user.id },
-    select: { role: true, status: true },
-  });
+  const registrations = await getUserRegistrations(session.user.id);
   return rolesOf(session.user, registrations);
 });
 

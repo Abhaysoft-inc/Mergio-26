@@ -20,6 +20,7 @@ export default async function DashboardPage() {
   const user = await requireUser();
   const registrations = await prisma.registration.findMany({
     where: { userId: user.id },
+    select: { id: true, role: true, status: true },
     orderBy: { createdAt: "asc" },
   });
   const firstName = user.name.split(" ")[0] || user.githubLogin || "there";

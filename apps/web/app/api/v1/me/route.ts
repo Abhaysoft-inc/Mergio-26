@@ -1,4 +1,5 @@
 import { prisma } from "@repo/db";
+import { getUserRegistrations } from "@/lib/dal";
 import { json, withRole } from "@/lib/rbac";
 import { parseStaffRole } from "@/lib/roles";
 
@@ -10,11 +11,7 @@ export const GET = withRole("SIGNED_IN", async (_request, _context, { user, role
       where: { userId: user.id, providerId: "github" },
       select: { accountId: true },
     }),
-    prisma.registration.findMany({
-      where: { userId: user.id },
-      select: { role: true, status: true, createdAt: true },
-      orderBy: { createdAt: "asc" },
-    }),
+    getUserRegistrations(user.id),
   ]);
 
   return json({

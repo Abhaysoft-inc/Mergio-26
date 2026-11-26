@@ -30,8 +30,8 @@ export default async function RegisterPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const preselect = parseRole((await searchParams).role);
-  const session = await getSession();
+  const [params, session] = await Promise.all([searchParams, getSession()]);
+  const preselect = parseRole(params.role);
 
   if (!session) {
     return (

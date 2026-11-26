@@ -105,15 +105,18 @@ export const auth = betterAuth({
   // (banUser() in lib/moderation.ts relies on this). 30 days, rolling: a session used after
   // it is a day old is pushed out to 30 days from then.
   //
-  // The session cookie cache stays off on purpose: with it on, a revoked session keeps
-  // working until the cached cookie expires. If it is ever turned on, keep maxAge at 60
-  // seconds or less so bans still take effect within a minute.
+  // The session cookie cache is kept to 60 seconds so revoked sessions/bans still take
+  // effect within a minute while avoiding a Postgres lookup on every navigation.
   //
   // Cookie attributes are Better Auth's defaults: httpOnly, SameSite=Lax, and Secure
   // whenever BETTER_AUTH_URL is https.
   session: {
     expiresIn: 30 * DAY,
     updateAge: DAY,
+    cookieCache: {
+      enabled: true,
+      maxAge: 60,
+    },
   },
 
   databaseHooks: {
